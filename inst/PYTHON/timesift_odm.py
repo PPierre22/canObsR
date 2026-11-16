@@ -378,5 +378,6 @@ def main():
                          overwrite=args.overwrite, keep_project=True if args.keep_project else None)
 
 
-if __name__ == '__main__':
+# reticulate::source_python() also runs this file as '__main__': the command line is only parsed when it is used
+if __name__ == '__main__' and any(a.startswith('--pathDIR') for a in sys.argv[1:]):
     main()
