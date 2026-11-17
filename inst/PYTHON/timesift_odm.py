@@ -28,9 +28,11 @@
 import argparse
 import hashlib
 import json
+import mmap
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -115,6 +117,60 @@ def _write_json(obj, path):
             out += ('\\u%04x' % o).encode()
     with open(path, 'wb') as f:
         f.write(bytes(out))
+
+
+# OpenSfM tracks.csv. Two formats exist:
+#  - text (versions 0 to 2): one observation per line, tab separated: image, track, feature, x, y, [scale,] r, g, b ...
+#  - binary (version 102, OpenSfM of ODM >= 3.6, opensfm/src/lib/map/src/tracks_manager.cc): after the header line,
+#    for each observation: uint16 image name length, uint16 track id length, image name, track id, then the
+#    20-byte struct {int32 feature; float32 x, y, scale; uint8 r, g, b; 1 padding byte}.
+TRACK_LEN = struct.Struct('<HH')
+TRACK_REC = struct.Struct('<ifffBBBx')
+
+
+def iter_tracks(path):
+    """Yields (image, track id, (r, g, b), raw bytes of the observation) for both formats; returns the header."""
+    with open(path, 'rb') as f:
+        header = f.readline()
+        m = re.search(rb'_v(\d+)', header)
+        version = int(m.group(1)) if m else 0
+        if version >= 100:
+            size = os.fstat(f.fileno()).st_size
+            if size <= len(header):
+                return
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            try:
+                pos, n = len(header), len(mm)
+                while pos + TRACK_LEN.size <= n:
+                    start = pos
+                    il, tl = TRACK_LEN.unpack_from(mm, pos)
+                    pos += TRACK_LEN.size
+                    if pos + il + tl + TRACK_REC.size > n:
+                        break
+                    image = mm[pos:pos + il].decode('utf-8', 'replace')
+                    track = mm[pos + il:pos + il + tl].decode('utf-8', 'replace')
+                    pos += il + tl
+                    rec = TRACK_REC.unpack_from(mm, pos)
+                    pos += TRACK_REC.size
+                    yield image, track, rec[4:7], mm[start:pos]
+            finally:
+                mm.close()
+        else:
+            icol = 5 if version == 0 else 6
+            for line in f:
+                cells = line.rstrip(b'\r\n').split(b'\t')
+                if len(cells) < icol + 3:
+                    continue
+                try:
+                    rgb = tuple(int(float(c)) for c in cells[icol:icol + 3])
+                except ValueError:
+                    rgb = (0, 0, 0)
+                yield cells[0].decode('utf-8', 'replace'), cells[1].decode('utf-8', 'replace'), rgb, line
+
+
+def tracks_header(path):
+    with open(path, 'rb') as f:
+        return f.readline()
 
 
 # ---------------------------------------------------------------------------------------------
@@ -353,11 +409,11 @@ def filter_tracks(path, valid_stems):
     sparse points are exported to OpenMVS (std::map default value in OpenSfM openmvs_exporter.h).
     """
     tmp = path + '.tmp'
-    with open(path, 'rb') as fin, open(tmp, 'wb') as fout:
-        fout.write(fin.readline())                       # header
-        for line in fin:
-            if _stem(line.split(b'\t', 1)[0].decode('utf-8', 'replace')) in valid_stems:
-                fout.write(line)
+    with open(tmp, 'wb') as fout:
+        fout.write(tracks_header(path))
+        for image, _, _, raw in iter_tracks(path):
+            if _stem(image) in valid_stems:
+                fout.write(raw)
     shutil.move(path, path + '.bak')
     shutil.move(tmp, path)
 
@@ -437,7 +493,7 @@ def make_epoch_project(workdir, epoch, images, gains=None):
 
 def _foreign(names, epoch, valid_stems):
     # names are made printable (undecodable bytes replaced) so that they can be returned to R
-    return sorted({str(n).encode('utf-8', 'replace').decode('utf-8') for n in names if _stem(n) not in valid_stems})
+    return sorted({str(n).encode('utf-8', 'replace').decode('utf-8').replace('\x00', '?') for n in names if _stem(n) not in valid_stems})
 
 
 def _shots(path):
@@ -503,9 +559,7 @@ def verify_epoch_project(workdir, epoch, valid_stems, all_epochs):
         check('other', 'images.json', [p.get('filename', '') for p in _read_json(os.path.join(root, 'images.json'))])
     tracks = os.path.join(und, 'tracks.csv')
     if os.path.isfile(tracks):
-        with open(tracks, 'rb') as f:
-            next(f)
-            check('other', 'opensfm/undistorted/tracks.csv', {line.split(b'\t', 1)[0].decode('utf-8', 'replace') for line in f})
+        check('other', 'opensfm/undistorted/tracks.csv', {image for image, _, _, _ in iter_tracks(tracks)})
     geo = os.path.join(root, 'odm_report', 'shots.geojson')
     if os.path.isfile(geo):
         check('other', 'odm_report/shots.geojson',
@@ -562,18 +616,14 @@ def compute_color_gains(block_dir, max_obs=3000000, seed=0):
     shots = {s for rec in recs for s in rec.get('shots', {})}
     img_index, trk_index = {}, {}
     rows_i, rows_t, cols = [], [], []
-    with open(os.path.join(block_dir, 'opensfm', 'tracks.csv'), encoding='utf-8', errors='replace') as f:
-        f.readline()
-        for line in f:
-            p = line.split('\t')
-            if len(p) < 9 or p[1] not in points or p[0] not in shots:
-                continue
-            rgb = (float(p[6]), float(p[7]), float(p[8]))
-            if min(rgb) < 5 or max(rgb) > 250:          # dark or saturated
-                continue
-            rows_i.append(img_index.setdefault(p[0], len(img_index)))
-            rows_t.append(trk_index.setdefault(p[1], len(trk_index)))
-            cols.append(rgb)
+    for image, track, rgb, _ in iter_tracks(os.path.join(block_dir, 'opensfm', 'tracks.csv')):
+        if track not in points or image not in shots:
+            continue
+        if min(rgb) < 5 or max(rgb) > 250:              # dark or saturated
+            continue
+        rows_i.append(img_index.setdefault(image, len(img_index)))
+        rows_t.append(trk_index.setdefault(track, len(trk_index)))
+        cols.append(tuple(float(c) for c in rgb))
     if not cols:
         raise TimeSiftError('Colour calibration: no tie point colour found in tracks.csv')
     I, T, L = np.array(rows_i), np.array(rows_t), np.log(np.array(cols))
