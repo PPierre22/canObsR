@@ -88,6 +88,35 @@ def _link_or_copy(src, dst):
         shutil.copy2(src, dst)
 
 
+# ODM / OpenSfM files are read as bytes and decoded as UTF-8 with 'surrogateescape': bytes that are not
+# valid UTF-8 (e.g. a camera name or a path written in the Windows code page) are kept unchanged when the
+# file is written back. Image names, the only thing used here, are ASCII.
+ENC = dict(encoding='utf-8', errors='surrogateescape', newline='')
+
+
+def _read_json(path):
+    with open(path, 'rb') as f:
+        return json.loads(f.read().decode('utf-8', 'surrogateescape'))
+
+
+def _write_json(obj, path):
+    """JSON written as ASCII, except the original undecodable bytes, which are written back unchanged."""
+    out = bytearray()
+    for ch in json.dumps(obj, ensure_ascii=False):
+        o = ord(ch)
+        if o < 128:
+            out.append(o)
+        elif 0xDC80 <= o <= 0xDCFF:          # undecodable byte of the original file
+            out.append(o - 0xDC00)
+        elif o > 0xFFFF:
+            o -= 0x10000
+            out += ('\\u%04x\\u%04x' % (0xD800 + (o >> 10), 0xDC00 + (o & 0x3FF))).encode()
+        else:
+            out += ('\\u%04x' % o).encode()
+    with open(path, 'wb') as f:
+        f.write(bytes(out))
+
+
 # ---------------------------------------------------------------------------------------------
 # 1. Images and epochs
 # ---------------------------------------------------------------------------------------------
@@ -298,8 +327,7 @@ def read_images_epochs(workdir):
 
 def filter_reconstruction(path, valid_stems):
     """Removes from an OpenSfM reconstruction.json the shots (and rig instances) of the other epochs."""
-    with open(path, encoding='utf-8') as f:
-        reconstructions = json.load(f)
+    reconstructions = _read_json(path)
     n = 0
     for rec in reconstructions:
         shots = rec.get('shots', {})
@@ -314,8 +342,7 @@ def filter_reconstruction(path, valid_stems):
                 del instances[inst_id]
         n += len(shots)
     shutil.copy(path, path + '.bak')
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(reconstructions, f)
+    _write_json(reconstructions, path)
     return n
 
 
@@ -326,10 +353,10 @@ def filter_tracks(path, valid_stems):
     sparse points are exported to OpenMVS (std::map default value in OpenSfM openmvs_exporter.h).
     """
     tmp = path + '.tmp'
-    with open(path, encoding='utf-8') as fin, open(tmp, 'w', encoding='utf-8') as fout:
+    with open(path, 'rb') as fin, open(tmp, 'wb') as fout:
         fout.write(fin.readline())                       # header
         for line in fin:
-            if _stem(line.split('\t', 1)[0]) in valid_stems:
+            if _stem(line.split(b'\t', 1)[0].decode('utf-8', 'replace')) in valid_stems:
                 fout.write(line)
     shutil.move(path, path + '.bak')
     shutil.move(tmp, path)
@@ -340,24 +367,22 @@ def filter_nvm(path, valid_stems):
     Keeps in reconstruction.nvm (list of cameras used by the texturing step) the cameras of the epoch only.
     The sparse points are dropped (their camera indices would be wrong, and texturing does not use them).
     """
-    with open(path, encoding='utf-8') as f:
+    with open(path, **ENC) as f:
         lines = f.read().split('\n')
     i = next(k for k, line in enumerate(lines) if k > 0 and line.strip())    # first non-empty line after the header
     n_cam = int(lines[i].split()[0])
     cams = [line for line in lines[i + 1:i + 1 + n_cam] if line.strip() and _stem(line.split()[0]) in valid_stems]
     shutil.copy(path, path + '.bak')
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines[:i] + [str(len(cams))] + cams + ['', '0', '', '0', '']))
+    eol = '\r' if lines[0].endswith('\r') else ''
+    with open(path, 'w', **ENC) as f:
+        f.write('\n'.join(lines[:i] + [str(len(cams)) + eol] + cams + [eol, '0' + eol, eol, '0' + eol, '']))
     return len(cams)
 
 
 def filter_images_db(path, valid_stems):
     """Keeps in images.json (ODM images database) the photos of the epoch only."""
-    with open(path, encoding='utf-8') as f:
-        photos = json.load(f)
-    photos = [p for p in photos if _stem(p.get('filename', '')) in valid_stems]
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(photos, f)
+    photos = [p for p in _read_json(path) if _stem(p.get('filename', '')) in valid_stems]
+    _write_json(photos, path)
     return len(photos)
 
 
@@ -411,12 +436,12 @@ def make_epoch_project(workdir, epoch, images, gains=None):
 # ---------------------------------------------------------------------------------------------
 
 def _foreign(names, epoch, valid_stems):
-    return sorted({str(n) for n in names if _stem(n) not in valid_stems})
+    # names are made printable (undecodable bytes replaced) so that they can be returned to R
+    return sorted({str(n).encode('utf-8', 'replace').decode('utf-8') for n in names if _stem(n) not in valid_stems})
 
 
 def _shots(path):
-    with open(path, encoding='utf-8') as f:
-        return [s for rec in json.load(f) for s in rec.get('shots', {})]
+    return [s for rec in _read_json(path) for s in rec.get('shots', {})]
 
 
 def _file_contains(path, patterns, chunk=1 << 24):
@@ -457,7 +482,7 @@ def verify_epoch_project(workdir, epoch, valid_stems, all_epochs):
         check('critical', 'opensfm/undistorted/reconstruction.json', _shots(os.path.join(und, 'reconstruction.json')))
     nvm = os.path.join(und, 'reconstruction.nvm')
     if os.path.isfile(nvm):
-        with open(nvm, encoding='utf-8') as f:
+        with open(nvm, **ENC) as f:
             lines = f.read().split('\n')
         i = next(k for k, line in enumerate(lines) if k > 0 and line.strip())
         check('critical', 'opensfm/undistorted/reconstruction.nvm (texturing)',
@@ -475,18 +500,16 @@ def verify_epoch_project(workdir, epoch, valid_stems, all_epochs):
     if os.path.isfile(os.path.join(root, 'opensfm', 'reconstruction.json')):
         check('other', 'opensfm/reconstruction.json', _shots(os.path.join(root, 'opensfm', 'reconstruction.json')))
     if os.path.isfile(os.path.join(root, 'images.json')):
-        with open(os.path.join(root, 'images.json'), encoding='utf-8') as f:
-            check('other', 'images.json', [p.get('filename', '') for p in json.load(f)])
+        check('other', 'images.json', [p.get('filename', '') for p in _read_json(os.path.join(root, 'images.json'))])
     tracks = os.path.join(und, 'tracks.csv')
     if os.path.isfile(tracks):
-        with open(tracks, encoding='utf-8') as f:
+        with open(tracks, 'rb') as f:
             next(f)
-            check('other', 'opensfm/undistorted/tracks.csv', {line.split('\t', 1)[0] for line in f})
+            check('other', 'opensfm/undistorted/tracks.csv', {line.split(b'\t', 1)[0].decode('utf-8', 'replace') for line in f})
     geo = os.path.join(root, 'odm_report', 'shots.geojson')
     if os.path.isfile(geo):
-        with open(geo, encoding='utf-8') as f:
-            check('other', 'odm_report/shots.geojson',
-                  [ft.get('properties', {}).get('filename', '') for ft in json.load(f).get('features', [])])
+        check('other', 'odm_report/shots.geojson',
+              [ft.get('properties', {}).get('filename', '') for ft in _read_json(geo).get('features', [])])
     res['ok'] = not res['critical']
     return res
 
@@ -512,7 +535,7 @@ def verify_projects(workdir, verbose=True):
                 for label, names in r[level].items():
                     log(f'    {level}: {label} contains images of other epochs: {", ".join(names[:3])}')
     with open(os.path.join(workdir, 'epochs_check.json'), 'w', encoding='utf-8') as f:
-        json.dump(results, f, indent=1)
+        json.dump(results, f, indent=1)          # ensure_ascii: undecodable bytes written as escapes
     return results
 
 
@@ -534,13 +557,12 @@ def compute_color_gains(block_dir, max_obs=3000000, seed=0):
     """
     import numpy as np
 
-    with open(os.path.join(block_dir, 'opensfm', 'reconstruction.json'), encoding='utf-8') as f:
-        recs = json.load(f)
+    recs = _read_json(os.path.join(block_dir, 'opensfm', 'reconstruction.json'))
     points = {str(p) for rec in recs for p in rec.get('points', {})}
     shots = {s for rec in recs for s in rec.get('shots', {})}
     img_index, trk_index = {}, {}
     rows_i, rows_t, cols = [], [], []
-    with open(os.path.join(block_dir, 'opensfm', 'tracks.csv'), encoding='utf-8') as f:
+    with open(os.path.join(block_dir, 'opensfm', 'tracks.csv'), encoding='utf-8', errors='replace') as f:
         f.readline()
         for line in f:
             p = line.split('\t')
