@@ -5,8 +5,19 @@
 #' Two engines are available: OpenDroneMap (`engine = "odm"`, free and open source, default) and the Metashape python API (`engine = "metashape"`, requires a license).
 #'
 #' @details
-#' With `engine = "odm"`, the arguments `data_type`, `calibrate_col`, `sun_sensor` and `from_mesh` are not used (RGB only for now).
-#' ODM always writes its products in the UTM zone of the images: the outputs are reprojected to `crs` when it is a different one.
+#' With `engine = "odm"`:
+#' * only RGB images are handled for now (`data_type`, `sun_sensor` and `from_mesh` are not used);
+#' * without `group_by_flight`, the subfolders of `path_in` without a date in their name are ignored, and an error is
+#'   raised if an image is found twice, or if the EXIF date of an image does not match the date of its folder (`check_dates`);
+#' * `downscale_factor_alignement` and `downscale_factor_depth_map` are converted to the ODM levels that use the same
+#'   image resolution as Metashape (ODM `--feature-quality` and `--pc-quality`);
+#' * `calibrate_col = TRUE` computes one gain per image and per colour channel so that the tie points of the whole
+#'   multi-temporal block (all dates together, as in the Metashape pipeline) have the same colour in all images, and
+#'   applies it to the images used to build the orthomosaics (see `color_gains.csv` in `out_dir_project`);
+#' * after each date, the ODM project is checked: an error is raised if an image of another date is found in it
+#'   (see also [check_odm_epochs()]);
+#' * the orthomosaics are written in the same format as with Metashape: 3 bands (RGB), white (255) background,
+#'   resolution `resol_ref` on a grid aligned on multiples of `resol_ref`, coordinate system `crs`.
 #' The ODM projects are written in `out_dir_project` (default: a `_odm_timesift_` folder inside `out_dir_ortho`, deleted at the end);
 #' this folder should be on the same disk as the images, which are then hard-linked instead of copied.
 #' If a run is interrupted, running the same call again resumes it (set `overwrite = TRUE` to start from scratch).
@@ -21,7 +32,7 @@
 #' @param resol_ref numeric. The resolution (in meters) used to generate DEMs and orthomosaics. Defaults to 0.05.
 #' @param crs character. Coordinate system used for the orthomosaic, in a string format. Example: crs="EPSG::32622" (default value).
 #' @param site_name character. Adds the data site name into the names of all created folders and files, to better separate generated data from different projects. If not specified, the names will stay generic.
-#' @param calibrate_col logical. Applies white balance.
+#' @param calibrate_col logical. Calibrates the colours of the images (brightness and white balance) on the tie points of all dates.
 #' @param sun_sensor logical. Calibrates the reflectance using the sun sensor. Only applies to multispectral images.
 #' @param group_by_flight logical. Regroups data by flight (i.e. one orthomosaic for each subfolder of the input folder containing images). If FALSE, regroups it by date (default).
 #' @param from_mesh logiclal. Generates the orthomosaics based on the mesh model rather than the DEM. In this case, the DEM will not be created.
@@ -34,6 +45,7 @@
 #' @param odm_runner character. How ODM is launched: "native" (default), "docker" or "apptainer" (clusters).
 #' @param odm_args character vector. Additional options passed to ODM, e.g. `c("--matcher-neighbors", "16")`.
 #' @param overwrite logical. Only for `engine = "odm"`. Deletes the existing ODM projects before running, instead of resuming.
+#' @param check_dates logical. Only for `engine = "odm"`. Checks that the EXIF date of every image matches the date of its folder.
 #'
 #' @export
 #' @importFrom reticulate source_python
@@ -88,7 +100,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                        suffix = "", folder_names = NULL,
                        engine = c("odm", "metashape"),
                        odm_path = NULL, odm_runner = c("native", "docker", "apptainer"),
-                       odm_args = NULL, overwrite = FALSE) {
+                       odm_args = NULL, overwrite = FALSE, check_dates = TRUE) {
 
    engine <- match.arg(engine)
    py <- new.env()
@@ -147,29 +159,91 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                                   odm_path = odm_path,
                                   odm_runner = odm_runner,
                                   odm_args = as.list(as.character(odm_args)),
-                                  overwrite = overwrite
+                                  overwrite = overwrite,
+                                  calibrate_col = calibrate_col,
+                                  check_dates = check_dates
                                   )
 
-   # ODM writes in the UTM zone of the images: reprojection if another crs is requested
-   files <- unlist(res)
+   # same format as the Metashape outputs: RGB, white background, resol_ref grid, crs
+   target <- gsub("::", ":", crs, fixed = TRUE)
+   for (f in unlist(res)) .format_odm_raster(f, target, resol_ref, type = "ortho")
    if (!is.null(out_dir_DEM)) {
       if (out_dir_DEM == "") out_dir_DEM <- file.path(dirname(out_dir_ortho), "DEM")
-      dem <- file.path(out_dir_DEM, basename(files))
-      files <- c(files, dem[file.exists(dem)])
-   }
-   target <- gsub("::", ":", crs, fixed = TRUE)
-   for (f in files) {
-      r <- terra::rast(f)
-      if (!terra::same.crs(r, target)) {
-         message("Reprojecting ", basename(f), " to ", target)
-         tmp <- paste0(tools::file_path_sans_ext(f), "_tmp.tif")
-         terra::project(r, target, res = resol_ref, filename = tmp, overwrite = TRUE,
-                        gdal = c("COMPRESS=LZW", "BIGTIFF=IF_SAFER"))
-         rm(r)
-         file.remove(f)
-         file.rename(tmp, f)
-      }
+      dem <- file.path(out_dir_DEM, basename(unlist(res)))
+      for (f in dem[file.exists(dem)]) .format_odm_raster(f, target, resol_ref, type = "dem")
    }
 
    invisible(unlist(res))
+}
+
+
+# Converts an ODM raster to the format of the Metashape outputs of canObsR
+#  - ortho: 3 bands (alpha removed), 255 where there is no data (Metashape white background), INT1U
+#  - dem: 1 band, NA where there is no data
+#  - both: crs, resolution res, grid aligned on multiples of res
+.format_odm_raster <- function(f, crs, res, type = c("ortho", "dem")) {
+   type <- match.arg(type)
+   r <- terra::rast(f)
+   if (type == "ortho") {
+      if (terra::nlyr(r) >= 4) {
+         r <- terra::mask(r[[1:3]], r[[4]], maskvalues = 0)
+      } else {
+         r <- r[[1:3]]
+      }
+   }
+   # template: target crs, grid aligned on multiples of res
+   e <- terra::ext(terra::project(terra::as.polygons(terra::ext(r), crs = terra::crs(r)), crs))
+   e <- terra::ext(floor(e$xmin / res) * res, ceiling(e$xmax / res) * res,
+                   floor(e$ymin / res) * res, ceiling(e$ymax / res) * res)
+   tmpl <- terra::rast(e, resolution = res, crs = crs)
+   tmp <- paste0(tools::file_path_sans_ext(f), "_canobs_tmp.tif")
+   gdal <- c("COMPRESS=LZW", "BIGTIFF=IF_SAFER", "TILED=YES")
+   if (type == "ortho") {
+      out <- terra::project(r, tmpl, method = "bilinear")
+      out <- terra::classify(round(out), cbind(NA, 255))
+      terra::writeRaster(out, tmp, datatype = "INT1U", gdal = gdal, overwrite = TRUE, NAflag = NA)
+   } else {
+      out <- terra::project(r, tmpl, method = "bilinear")
+      terra::writeRaster(out, tmp, datatype = "FLT4S", gdal = gdal, overwrite = TRUE)
+   }
+   rm(r, out)
+   gc()
+   file.remove(f)
+   file.rename(tmp, f)
+   invisible(f)
+}
+
+
+#' Check that the ODM projects of a Time-SIFT run do not mix dates
+#'
+#' @description
+#' Checks, for each date (epoch) of a Time-SIFT run made with `generate_Mosa(engine = "odm")`, that the ODM project of
+#' this date only refers to images of this date. All the files that list images are read: image folders, OpenSfM
+#' reconstructions, list of cameras used for the texturing (orthomosaic), OpenMVS scene, tracks, ODM report.
+#' The images are renamed `<date>__<original name>` by `generate_Mosa()`, so the date of every image is known.
+#'
+#' `generate_Mosa()` already runs this check after each date and stops if a problem is found.
+#'
+#' @param out_dir_project character. The `out_dir_project` folder given to `generate_Mosa()`.
+#' @param verbose logical. Prints the result for each date.
+#'
+#' @return A data.frame with one row per date: `ok` is FALSE if an image of another date was found in a file that
+#' decides which images are used for the point cloud, the texture or the orthomosaic (`critical`); `other` lists the
+#' other files (sparse points, GSD estimate, report) where images of other dates were found. The details are also
+#' written in `epochs_check.json` in `out_dir_project`.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' check_odm_epochs("D:/my_data/2_odm_projects")
+#' }
+check_odm_epochs <- function(out_dir_project, verbose = TRUE) {
+   py <- new.env()
+   reticulate::source_python(system.file("PYTHON/timesift_odm.py", package = "canObsR"), envir = py)
+   res <- py$verify_projects(normalizePath(out_dir_project, winslash = "/"), verbose = verbose)
+   data.frame(epoch = vapply(res, function(x) x$epoch, ""),
+              ok = vapply(res, function(x) isTRUE(x$ok), TRUE),
+              files_checked = vapply(res, function(x) length(x$checked), 0L),
+              critical = vapply(res, function(x) paste(names(x$critical), collapse = "; "), ""),
+              other = vapply(res, function(x) paste(names(x$other), collapse = "; "), ""))
 }

@@ -12,15 +12,21 @@
 #
 # Differences with the ODM plugin:
 #   - ODM can be launched natively (run.bat / run.sh), with docker or with apptainer;
-#   - images are hard-linked (not copied) and renamed with their epoch as prefix, so that two
-#     flights can contain files with the same name;
-#   - the per-epoch project is a light copy (no raw images of other epochs, no features/matches);
-#   - reconstruction.nvm (used by the texturing step) and images.json are filtered as well;
-#   - a run can be resumed.
+#   - images are hard-linked (not copied) and renamed with their epoch as prefix ("<epoch>__<name>"),
+#     so that two flights can contain files with the same name, and so that the epoch of every
+#     image can be checked at any step;
+#   - every file of the epoch project that lists images is filtered (the plugin only filters
+#     undistorted/reconstruction.json): reconstruction.json, undistorted/reconstruction.json,
+#     undistorted/tracks.csv, undistorted/reconstruction.nvm, images.json;
+#   - after each epoch, the project is checked: no image of another epoch may be found in it;
+#   - optional colour calibration of the images on the tie points of the whole multi-temporal block
+#     (equivalent of Metashape calibrateColors(), used by the Metashape pipeline of canObsR);
+#   - a run can be resumed; time spent in each ODM stage is reported.
 #
-# Only the python standard library is required.
+# The python standard library is enough, except for the colour calibration (numpy + pillow or gdal).
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -32,12 +38,28 @@ import time
 IMG_EXT = ('.jpg', '.jpeg', '.png', '.tif', '.tiff')
 DATE_PATTERN = r'\d{4}(0[1-9]|1[0-2])([0-2][0-9]|3[01])?'
 BLOCK_NAME = 'timesift_block'
-ALIGN_QUALITY = {0: 'ultra', 1: 'high', 2: 'medium', 4: 'low', 8: 'lowest'}
-DEPTH_QUALITY = {1: 'ultra', 2: 'high', 4: 'medium', 8: 'low', 16: 'lowest'}
+SEP = '__'                      # separator between the epoch and the original image name
+RESERVED = {BLOCK_NAME, 'time-sift-block'}
+PARAMS_FILE = 'canobs_timesift_params.json'
+TIMINGS_FILE = 'timings.csv'
+COLOR_FILE = 'color_gains.csv'
+
+# Metashape downscale factors -> ODM quality levels, at the same image resolution:
+# alignment: Metashape 1 (High) = original images; ODM feature-quality ultra = original images (1),
+#            high = 1/2, medium = 1/4, low = 1/8, lowest = 1/16 (ODM caps feature images at 4480 px)
+ALIGN_QUALITY = {0: 'ultra', 1: 'ultra', 2: 'high', 4: 'medium', 8: 'low'}
+# depth maps: Metashape 1 (Ultra high) = original images, 2 (High) = 1/2, 4 (Medium) = 1/4 ...;
+#             ODM pc-quality ultra = 1/2 of the images, high = 1/4, medium = 1/8, low = 1/16
+#             (ODM has no level at full resolution: 1 and 2 both give 'ultra')
+DEPTH_QUALITY = {1: 'ultra', 2: 'ultra', 4: 'high', 8: 'medium', 16: 'low'}
 
 
 def log(msg):
     print(f'[Time-SIFT ODM] {msg}', flush=True)
+
+
+class TimeSiftError(Exception):
+    pass
 
 
 def _safe(name):
@@ -47,7 +69,13 @@ def _safe(name):
 
 def _stem(name):
     """File name without any extension ('a/b/x.JPG.tif' -> 'x')."""
-    return os.path.basename(name).split(os.extsep)[0]
+    return os.path.basename(str(name)).split(os.extsep)[0]
+
+
+def epoch_of(name):
+    """Epoch of a renamed image ('20220427__DJI_0042.JPG.tif' -> '20220427'), None if not renamed."""
+    stem = _stem(name)
+    return stem.split(SEP)[0] if SEP in stem else None
 
 
 def _link_or_copy(src, dst):
@@ -60,14 +88,43 @@ def _link_or_copy(src, dst):
         shutil.copy2(src, dst)
 
 
-def list_epochs(path_in, group_by_flight=False, folder_names=None):
+# ---------------------------------------------------------------------------------------------
+# 1. Images and epochs
+# ---------------------------------------------------------------------------------------------
+
+def exif_date(path, nbytes=131072):
+    """Date (YYYYMMDD) of the first EXIF date-time found in the image header, None if not found."""
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(nbytes)
+    except OSError:
+        return None
+    m = re.search(rb'((?:19|20)\d{2}):(\d{2}):(\d{2}) \d{2}:\d{2}:\d{2}', head)
+    return (m.group(1) + m.group(2) + m.group(3)).decode() if m else None
+
+
+def _fingerprint(path, nbytes=262144):
+    """Size + hash of the beginning of the file (EXIF time stamp and GPS make it unique per shot)."""
+    h = hashlib.sha1()
+    with open(path, 'rb') as f:
+        h.update(f.read(nbytes))
+    return f'{os.path.getsize(path)}-{h.hexdigest()}'
+
+
+def list_epochs(path_in, group_by_flight=False, folder_names=None, check_dates=True, check_duplicates=True):
     """
     Lists the images of each epoch.
 
-    Each sub-folder of path_in is a flight (images are searched recursively). An epoch is a date
+    Each sub-folder of path_in is a flight (images are searched recursively in it). An epoch is a date
     (YYYYMMDD or YYYYMM found in the flight folder name, default) or a flight (group_by_flight).
+    Without group_by_flight, sub-folders without a date in their name are ignored (with a warning).
 
-    Returns a dict {epoch: [(source_path, new_name), ...]}. new_name is unique in the whole block.
+    Safety checks (errors):
+      - check_dates: the EXIF date of every image must match the date of its folder;
+      - check_duplicates: the same image file cannot be found twice (e.g. a copy of the images in a
+        working folder inside path_in).
+
+    Returns a dict {epoch: [(source_path, new_name), ...]}, new_name = "<epoch>__<original name>".
     """
     path_in = os.path.abspath(path_in)
     if folder_names is None:
@@ -77,31 +134,66 @@ def list_epochs(path_in, group_by_flight=False, folder_names=None):
     else:
         flights = list(folder_names)
 
-    epochs, used = {}, set()
+    epochs, used, ignored = {}, set(), []
+    date_errors, seen, duplicates = [], {}, []
     for flight in flights:
+        if flight in RESERVED or flight.startswith(('.', '_')):
+            ignored.append(flight)
+            continue
+        m = re.search(DATE_PATTERN, flight)
         if group_by_flight:
             epoch = _safe(flight)
+        elif m:
+            epoch = m.group()
         else:
-            m = re.search(DATE_PATTERN, flight)
-            epoch = m.group() if m else _safe(flight)
-        if epoch == BLOCK_NAME:
-            raise ValueError(f"'{BLOCK_NAME}' cannot be used as a flight name")
-        for dirpath, _, filenames in os.walk(os.path.join(path_in, flight)):
+            ignored.append(flight)
+            continue
+        for dirpath, dirnames, filenames in os.walk(os.path.join(path_in, flight)):
+            dirnames[:] = sorted(d for d in dirnames if d not in RESERVED)
             for f in sorted(filenames):
                 if not f.lower().endswith(IMG_EXT):
                     continue
+                src = os.path.join(dirpath, f)
+                if check_duplicates:
+                    fp = _fingerprint(src)
+                    if fp in seen:
+                        duplicates.append((seen[fp], src))
+                        continue
+                    seen[fp] = src
+                if check_dates and m:
+                    d = exif_date(src)
+                    if d is not None and not d.startswith(m.group()):
+                        date_errors.append(f'{src}: EXIF date {d}, folder date {m.group()}')
                 stem, ext = os.path.splitext(f)
-                new = f'{epoch}__{_safe(stem)}'
+                new = f'{epoch}{SEP}{_safe(stem)}'
                 i = 1
                 while new in used:              # same file name in two flights of the same date
                     i += 1
-                    new = f'{epoch}__{_safe(stem)}_{i}'
+                    new = f'{epoch}{SEP}{_safe(stem)}_{i}'
                 used.add(new)
-                epochs.setdefault(epoch, []).append((os.path.join(dirpath, f), new + ext))
+                epochs.setdefault(epoch, []).append((src, new + ext))
+
+    if ignored:
+        log('WARNING: sub-folders ignored (no date in their name, or reserved name): ' + ', '.join(ignored))
+    if duplicates:
+        raise TimeSiftError(f'{len(duplicates)} image(s) found twice in {path_in}, e.g.:\n  '
+                            + '\n  '.join(f'{a}  ==  {b}' for a, b in duplicates[:5])
+                            + '\nRemove the copies (each image must be in the folder of its flight only).')
+    if date_errors:
+        raise TimeSiftError(f'{len(date_errors)} image(s) whose EXIF date does not match the date of their folder, e.g.:\n  '
+                            + '\n  '.join(date_errors[:10])
+                            + '\nCheck the folders, or use check_dates = FALSE if the folder dates are right.')
     if not epochs:
-        raise ValueError(f'No image found in the sub-folders of {path_in}')
+        raise TimeSiftError(f'No image found in dated sub-folders of {path_in}')
+    for epoch in epochs:
+        if any(epoch != e and (epoch + SEP).startswith(e + SEP) for e in epochs):
+            raise TimeSiftError(f'Ambiguous epoch names: {epoch}')
     return epochs
 
+
+# ---------------------------------------------------------------------------------------------
+# 2. Running ODM
+# ---------------------------------------------------------------------------------------------
 
 def odm_command(runner, odm_path, datasets_dir, project, options):
     """Builds the command line that runs ODM on datasets_dir/project."""
@@ -121,21 +213,66 @@ def odm_command(runner, odm_path, datasets_dir, project, options):
     raise ValueError(f"Unknown runner '{runner}' (native, docker or apptainer)")
 
 
+STAGE_RE = re.compile(r'\[INFO\]\s+(Running|Finished) (\S+) stage')
+GPU_RE = re.compile(r'(?i)\b(gpu|cuda)\b')
+
+
 def run_odm(runner, odm_path, datasets_dir, project, options):
+    """Runs ODM, writes its log in datasets_dir/odm_<project>.log and the time spent in each stage in timings.csv."""
     cmd = odm_command(runner, odm_path, datasets_dir, project, options)
     log('Running: ' + ' '.join(cmd))
     env = dict(os.environ, ODM_NONINTERACTIVE='1')
-    # ODM is run from its own folder: it must not inherit the python environment of the caller (conda, reticulate)
+    # ODM is run with its own python: it must not inherit the python environment of the caller (conda, reticulate)
     for var in ('PYTHONPATH', 'PYTHONHOME'):
         env.pop(var, None)
-    with open(os.path.join(datasets_dir, f'odm_{project}.log'), 'a', encoding='utf-8', errors='replace') as logfile:
+    started, gpu_lines = {}, []
+    timings = os.path.join(datasets_dir, TIMINGS_FILE)
+    new_file = not os.path.isfile(timings)
+    with open(os.path.join(datasets_dir, f'odm_{project}.log'), 'a', encoding='utf-8', errors='replace') as logfile, \
+            open(timings, 'a', encoding='utf-8') as tfile:
+        if new_file:
+            tfile.write('project,stage,seconds\n')
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                 env=env, text=True, encoding='utf-8', errors='replace')
         for line in proc.stdout:
             logfile.write(line)
             print(line, end='', flush=True)
-        return proc.wait()
+            m = STAGE_RE.search(line)
+            if m:
+                if m.group(1) == 'Running':
+                    started[m.group(2)] = time.time()
+                elif m.group(2) in started:
+                    tfile.write(f'{project},{m.group(2)},{time.time() - started.pop(m.group(2)):.0f}\n')
+                    tfile.flush()
+            elif GPU_RE.search(line) and len(gpu_lines) < 5 and line.strip() not in gpu_lines:
+                gpu_lines.append(line.strip())
+        code = proc.wait()
+    if gpu_lines:
+        log('GPU information found in the ODM log: ' + ' | '.join(gpu_lines))
+    return code
 
+
+def timings_summary(workdir):
+    """Time spent per ODM stage: SfM block, and sum over the epochs."""
+    path = os.path.join(workdir, TIMINGS_FILE)
+    if not os.path.isfile(path):
+        return
+    block, epochs = {}, {}
+    with open(path, encoding='utf-8') as f:
+        next(f)
+        for line in f:
+            project, stage, sec = line.strip().split(',')
+            target = block if project == BLOCK_NAME else epochs
+            target[stage] = target.get(stage, 0) + float(sec)
+    log('Time spent per ODM stage (minutes):')
+    for name, d in (('SfM block', block), ('all epochs', epochs)):
+        if d:
+            log(f'  {name}: ' + ', '.join(f'{s} {v / 60:.1f}' for s, v in d.items() if v >= 30))
+
+
+# ---------------------------------------------------------------------------------------------
+# 3. Epoch projects
+# ---------------------------------------------------------------------------------------------
 
 def prepare_block(workdir, epochs):
     """Creates workdir/timesift_block/images with (links to) all images, and the images_epochs.txt file."""
@@ -148,35 +285,54 @@ def prepare_block(workdir, epochs):
                 f.write(f'{name} {epoch}\n')
 
 
-def _filter_keys(d, valid_stems):
-    for key in list(d):
-        if _stem(key) not in valid_stems:
-            del d[key]
+def read_images_epochs(workdir):
+    """{epoch: set of image stems} from timesift_block/images_epochs.txt."""
+    out = {}
+    with open(os.path.join(workdir, BLOCK_NAME, 'images_epochs.txt'), encoding='utf-8') as f:
+        for line in f:
+            if line.strip():
+                name, epoch = line.split()
+                out.setdefault(epoch, set()).add(_stem(name))
+    return out
 
 
 def filter_reconstruction(path, valid_stems):
-    """Removes from an OpenSfM reconstruction.json the shots that do not belong to the epoch."""
+    """Removes from an OpenSfM reconstruction.json the shots (and rig instances) of the other epochs."""
     with open(path, encoding='utf-8') as f:
         reconstructions = json.load(f)
     n = 0
     for rec in reconstructions:
-        for key in ('shots', 'rig_instances'):
-            if key in rec:
-                if key == 'rig_instances':
-                    # a rig instance is kept if one of its shots belongs to the epoch
-                    for inst_id in list(rec[key]):
-                        inst = rec[key][inst_id]
-                        shots = inst.get('rig_camera_ids', {}) if isinstance(inst, dict) else {}
-                        ids = list(shots) + [inst_id]
-                        if not any(_stem(i) in valid_stems for i in ids):
-                            del rec[key][inst_id]
-                else:
-                    _filter_keys(rec[key], valid_stems)
-        n += len(rec.get('shots', {}))
+        shots = rec.get('shots', {})
+        for key in list(shots):
+            if _stem(key) not in valid_stems:
+                del shots[key]
+        instances = rec.get('rig_instances', {})
+        for inst_id in list(instances):
+            inst = instances[inst_id]
+            ids = list(inst.get('rig_camera_ids', {})) if isinstance(inst, dict) else []
+            if not any(_stem(i) in valid_stems for i in ids + [inst_id]):
+                del instances[inst_id]
+        n += len(shots)
     shutil.copy(path, path + '.bak')
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(reconstructions, f)
     return n
+
+
+def filter_tracks(path, valid_stems):
+    """
+    Keeps in an OpenSfM tracks.csv the observations of the epoch only.
+    Without it, the observations of the other epochs are given to the first image of the epoch when the
+    sparse points are exported to OpenMVS (std::map default value in OpenSfM openmvs_exporter.h).
+    """
+    tmp = path + '.tmp'
+    with open(path, encoding='utf-8') as fin, open(tmp, 'w', encoding='utf-8') as fout:
+        fout.write(fin.readline())                       # header
+        for line in fin:
+            if _stem(line.split('\t', 1)[0]) in valid_stems:
+                fout.write(line)
+    shutil.move(path, path + '.bak')
+    shutil.move(tmp, path)
 
 
 def filter_nvm(path, valid_stems):
@@ -205,7 +361,7 @@ def filter_images_db(path, valid_stems):
     return len(photos)
 
 
-def make_epoch_project(workdir, epoch, images):
+def make_epoch_project(workdir, epoch, images, gains=None):
     """Light copy of the Time-SIFT block, restricted to the cameras of one epoch."""
     block = os.path.join(workdir, BLOCK_NAME)
     dst = os.path.join(workdir, epoch)
@@ -216,32 +372,265 @@ def make_epoch_project(workdir, epoch, images):
              os.path.join(block, 'opensfm', 'undistorted', 'images')}
 
     def ignore(folder, names):
-        return [n for n in names if os.path.join(folder, n) in heavy]
+        return [n for n in names if os.path.join(folder, n) in heavy or n.endswith('.bak')]
 
     shutil.copytree(block, dst, ignore=ignore)
 
-    # raw and undistorted images of the epoch: links
+    # raw images of the epoch: links
     os.makedirs(os.path.join(dst, 'images'))
     for _, name in images:
         _link_or_copy(os.path.join(block, 'images', name), os.path.join(dst, 'images', name))
+    # undistorted images of the epoch (the ones used by OpenMVS and by the texturing): links, or colour-corrected copies
     und_src = os.path.join(block, 'opensfm', 'undistorted', 'images')
     und_dst = os.path.join(dst, 'opensfm', 'undistorted', 'images')
     os.makedirs(und_dst)
     for f in os.listdir(und_src):
         if _stem(f) in valid:
-            _link_or_copy(os.path.join(und_src, f), os.path.join(und_dst, f))
+            if gains is not None and _stem(f) in gains:
+                apply_gain(os.path.join(und_src, f), os.path.join(und_dst, f), gains[_stem(f)])
+            else:
+                _link_or_copy(os.path.join(und_src, f), os.path.join(und_dst, f))
 
-    n = filter_reconstruction(os.path.join(dst, 'opensfm', 'undistorted', 'reconstruction.json'), valid)
+    osfm = os.path.join(dst, 'opensfm')
+    n = filter_reconstruction(os.path.join(osfm, 'undistorted', 'reconstruction.json'), valid)
     if n == 0:
-        raise RuntimeError(f'Epoch {epoch}: none of its {len(images)} images was aligned by the SfM')
+        raise TimeSiftError(f'Epoch {epoch}: none of its {len(images)} images was aligned by the SfM')
     log(f'Epoch {epoch}: {n} aligned cameras out of {len(images)} images')
-    nvm = os.path.join(dst, 'opensfm', 'undistorted', 'reconstruction.nvm')
-    if os.path.isfile(nvm):
-        filter_nvm(nvm, valid)
-    db = os.path.join(dst, 'images.json')
-    if os.path.isfile(db):
-        filter_images_db(db, valid)
+    if os.path.isfile(os.path.join(osfm, 'reconstruction.json')):
+        filter_reconstruction(os.path.join(osfm, 'reconstruction.json'), valid)
+    if os.path.isfile(os.path.join(osfm, 'undistorted', 'tracks.csv')):
+        filter_tracks(os.path.join(osfm, 'undistorted', 'tracks.csv'), valid)
+    if os.path.isfile(os.path.join(osfm, 'undistorted', 'reconstruction.nvm')):
+        filter_nvm(os.path.join(osfm, 'undistorted', 'reconstruction.nvm'), valid)
+    if os.path.isfile(os.path.join(dst, 'images.json')):
+        filter_images_db(os.path.join(dst, 'images.json'), valid)
 
+
+# ---------------------------------------------------------------------------------------------
+# 4. Checks: no image of another epoch in an epoch project
+# ---------------------------------------------------------------------------------------------
+
+def _foreign(names, epoch, valid_stems):
+    return sorted({str(n) for n in names if _stem(n) not in valid_stems})
+
+
+def _shots(path):
+    with open(path, encoding='utf-8') as f:
+        return [s for rec in json.load(f) for s in rec.get('shots', {})]
+
+
+def _file_contains(path, patterns, chunk=1 << 24):
+    """Patterns (bytes) found in a (possibly large, binary) file."""
+    found, overlap, prev = set(), max(len(p) for p in patterns), b''
+    with open(path, 'rb') as f:
+        while True:
+            block = f.read(chunk)
+            if not block:
+                break
+            data = prev + block
+            found.update(p for p in patterns if p in data)
+            prev = data[-overlap:]
+    return found
+
+
+def verify_epoch_project(workdir, epoch, valid_stems, all_epochs):
+    """
+    Checks that an epoch project only refers to images of this epoch.
+    'critical': files that decide which images are used to build the point cloud, the mesh texture and the
+    orthomosaic. 'other': files that only change the processing (sparse points, GSD estimate, report).
+    """
+    root = os.path.join(workdir, epoch)
+    und = os.path.join(root, 'opensfm', 'undistorted')
+    res = {'epoch': epoch, 'critical': {}, 'other': {}, 'checked': []}
+
+    def check(level, label, names):
+        res['checked'].append(label)
+        bad = _foreign(names, epoch, valid_stems)
+        if bad:
+            res[level][label] = bad[:10] + ([f'... ({len(bad)} in total)'] if len(bad) > 10 else [])
+
+    if os.path.isdir(os.path.join(root, 'images')):
+        check('critical', 'images/', os.listdir(os.path.join(root, 'images')))
+    if os.path.isdir(os.path.join(und, 'images')):
+        check('critical', 'opensfm/undistorted/images/', os.listdir(os.path.join(und, 'images')))
+    if os.path.isfile(os.path.join(und, 'reconstruction.json')):
+        check('critical', 'opensfm/undistorted/reconstruction.json', _shots(os.path.join(und, 'reconstruction.json')))
+    nvm = os.path.join(und, 'reconstruction.nvm')
+    if os.path.isfile(nvm):
+        with open(nvm, encoding='utf-8') as f:
+            lines = f.read().split('\n')
+        i = next(k for k, line in enumerate(lines) if k > 0 and line.strip())
+        check('critical', 'opensfm/undistorted/reconstruction.nvm (texturing)',
+              [line.split()[0] for line in lines[i + 1:i + 1 + int(lines[i].split()[0])] if line.strip()])
+    others = [e for e in all_epochs if e != epoch]
+    for mvs in ('scene.mvs', 'scene_dense.mvs'):
+        path = os.path.join(root, 'opensfm', 'undistorted', 'openmvs', mvs)
+        if not os.path.isfile(path):
+            path = os.path.join(root, 'openmvs', mvs)
+        if os.path.isfile(path) and others:
+            res['checked'].append(f'openmvs/{mvs}')
+            hits = _file_contains(path, [(e + SEP).encode() for e in others])
+            if hits:
+                res['critical'][f'openmvs/{mvs}'] = sorted(h.decode() for h in hits)
+    if os.path.isfile(os.path.join(root, 'opensfm', 'reconstruction.json')):
+        check('other', 'opensfm/reconstruction.json', _shots(os.path.join(root, 'opensfm', 'reconstruction.json')))
+    if os.path.isfile(os.path.join(root, 'images.json')):
+        with open(os.path.join(root, 'images.json'), encoding='utf-8') as f:
+            check('other', 'images.json', [p.get('filename', '') for p in json.load(f)])
+    tracks = os.path.join(und, 'tracks.csv')
+    if os.path.isfile(tracks):
+        with open(tracks, encoding='utf-8') as f:
+            next(f)
+            check('other', 'opensfm/undistorted/tracks.csv', {line.split('\t', 1)[0] for line in f})
+    geo = os.path.join(root, 'odm_report', 'shots.geojson')
+    if os.path.isfile(geo):
+        with open(geo, encoding='utf-8') as f:
+            check('other', 'odm_report/shots.geojson',
+                  [ft.get('properties', {}).get('filename', '') for ft in json.load(f).get('features', [])])
+    res['ok'] = not res['critical']
+    return res
+
+
+def verify_projects(workdir, verbose=True):
+    """
+    Checks all the epoch projects of a Time-SIFT working folder (out_dir_project). Can be run on a finished
+    or interrupted run. Returns a list of results (one per epoch); 'ok' is False if an image of another
+    epoch was found in a critical file.
+    """
+    workdir = os.path.abspath(workdir)
+    epochs = read_images_epochs(workdir)
+    results = []
+    for epoch, stems in epochs.items():
+        if not os.path.isdir(os.path.join(workdir, epoch)):
+            continue
+        r = verify_epoch_project(workdir, epoch, stems, list(epochs))
+        results.append(r)
+        if verbose:
+            state = 'OK' if r['ok'] else 'PROBLEM'
+            log(f'Check of epoch {epoch}: {state} ({len(r["checked"])} files checked)')
+            for level in ('critical', 'other'):
+                for label, names in r[level].items():
+                    log(f'    {level}: {label} contains images of other epochs: {", ".join(names[:3])}')
+    with open(os.path.join(workdir, 'epochs_check.json'), 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=1)
+    return results
+
+
+# ---------------------------------------------------------------------------------------------
+# 5. Colour calibration (equivalent of Metashape calibrateColors on tie points)
+# ---------------------------------------------------------------------------------------------
+
+def compute_color_gains(block_dir, max_obs=3000000, seed=0):
+    """
+    One gain per image and per channel, so that the tie points of the whole multi-temporal block have
+    the same colour in all the images where they are seen (images of all dates are calibrated together,
+    as in the Metashape pipeline where calibrateColors() is run on the merged Time-SIFT chunk).
+
+    Model: log(colour observed) = log(gain of the image) + log(colour of the tie point), fitted by
+    alternating least squares with removal of outliers; the mean of the log gains is 0 for each channel
+    (the overall brightness and colour balance of the block are kept).
+    Tie point colours come from OpenSfM tracks.csv (colour of the image at the feature location).
+    Returns {image stem: (gain_r, gain_g, gain_b)}; the gain multiplies the pixel values.
+    """
+    import numpy as np
+
+    with open(os.path.join(block_dir, 'opensfm', 'reconstruction.json'), encoding='utf-8') as f:
+        recs = json.load(f)
+    points = {str(p) for rec in recs for p in rec.get('points', {})}
+    shots = {s for rec in recs for s in rec.get('shots', {})}
+    img_index, trk_index = {}, {}
+    rows_i, rows_t, cols = [], [], []
+    with open(os.path.join(block_dir, 'opensfm', 'tracks.csv'), encoding='utf-8') as f:
+        f.readline()
+        for line in f:
+            p = line.split('\t')
+            if len(p) < 9 or p[1] not in points or p[0] not in shots:
+                continue
+            rgb = (float(p[6]), float(p[7]), float(p[8]))
+            if min(rgb) < 5 or max(rgb) > 250:          # dark or saturated
+                continue
+            rows_i.append(img_index.setdefault(p[0], len(img_index)))
+            rows_t.append(trk_index.setdefault(p[1], len(trk_index)))
+            cols.append(rgb)
+    if not cols:
+        raise TimeSiftError('Colour calibration: no tie point colour found in tracks.csv')
+    I, T, L = np.array(rows_i), np.array(rows_t), np.log(np.array(cols))
+    # tie points seen in at least 2 images
+    keep = np.bincount(T)[T] >= 2
+    if keep.sum() > max_obs:
+        rng = np.random.default_rng(seed)
+        tracks_kept = rng.choice(len(trk_index), size=max(1, int(len(trk_index) * max_obs / keep.sum())), replace=False)
+        mask = np.zeros(len(trk_index), bool)
+        mask[tracks_kept] = True
+        keep &= mask[T]
+    I, T, L = I[keep], T[keep], L[keep]
+    _, T = np.unique(T, return_inverse=True)
+    n_img, n_trk = len(img_index), T.max() + 1
+    a = np.zeros((n_img, 3))
+    w = np.ones(len(I), bool)
+    for it in range(30):
+        cnt_t = np.maximum(np.bincount(T, w, n_trk), 1)
+        t = np.stack([np.bincount(T, w * (L[:, c] - a[I, c]), n_trk) for c in range(3)], 1) / cnt_t[:, None]
+        cnt_i = np.maximum(np.bincount(I, w, n_img), 1)
+        a = np.stack([np.bincount(I, w * (L[:, c] - t[T, c]), n_img) for c in range(3)], 1) / cnt_i[:, None]
+        a -= a.mean(0)
+        if it in (9, 19):                               # removal of outliers (3.5 robust sd)
+            r = np.abs(L - a[I] - t[T]).max(1)
+            w = r < 3.5 * 1.4826 * np.median(r[w]) + 1e-6
+    gains = np.clip(np.exp(-a), 0.5, 2.0)
+    n_obs = np.bincount(I, w, n_img)
+    names = sorted(img_index, key=img_index.get)
+    return {_stem(n): tuple(float(g) for g in gains[k]) for k, n in enumerate(names)}, \
+        {_stem(n): int(n_obs[k]) for k, n in enumerate(names)}
+
+
+def save_color_gains(path, gains, n_obs):
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('image,epoch,gain_r,gain_g,gain_b,n_obs\n')
+        for k in sorted(gains):
+            g = gains[k]
+            f.write(f'{k},{epoch_of(k)},{g[0]:.4f},{g[1]:.4f},{g[2]:.4f},{n_obs.get(k, 0)}\n')
+
+
+def apply_gain(src, dst, gain):
+    """Writes a colour-corrected copy of an image (the source, possibly hard-linked, is not modified)."""
+    import numpy as np
+    try:
+        from PIL import Image
+        Image.MAX_IMAGE_PIXELS = None
+        with Image.open(src) as im:
+            arr = np.asarray(im)
+        mode = None
+    except Exception:
+        from osgeo import gdal
+        ds = gdal.Open(src)
+        arr = np.moveaxis(ds.ReadAsArray(), 0, -1)
+        ds = None
+        mode = 'gdal'
+    out = arr.astype(np.float32)
+    for c in range(min(3, out.shape[-1])):
+        out[..., c] *= gain[c]
+    vmax = np.iinfo(arr.dtype).max if np.issubdtype(arr.dtype, np.integer) else None
+    if vmax is not None:
+        out = np.clip(np.rint(out), 0, vmax)
+    out = out.astype(arr.dtype)
+    if os.path.exists(dst):
+        os.remove(dst)
+    if mode is None:
+        from PIL import Image
+        Image.fromarray(out).save(dst)
+    else:
+        from osgeo import gdal
+        drv = gdal.GetDriverByName('GTiff')
+        ds = drv.Create(dst, out.shape[1], out.shape[0], out.shape[2], gdal.GDT_Byte if out.dtype == np.uint8 else gdal.GDT_UInt16)
+        for c in range(out.shape[2]):
+            ds.GetRasterBand(c + 1).WriteArray(out[..., c])
+        ds = None
+
+
+# ---------------------------------------------------------------------------------------------
+# 6. Complete process
+# ---------------------------------------------------------------------------------------------
 
 def timesift_odm_process(pathDIR,
                          out_dir_ortho,
@@ -254,6 +643,8 @@ def timesift_odm_process(pathDIR,
                          downscale_factor_depth_map=2,
                          suffix="",
                          folder_names=None,
+                         calibrate_col=True,
+                         check_dates=True,
                          odm_path=None,
                          odm_runner="native",
                          odm_args=None,
@@ -269,11 +660,14 @@ def timesift_odm_process(pathDIR,
     :param str out_dir_project: folder of the ODM projects (working directory). Default: <out_dir_ortho>/_odm_timesift_.
         It should be on the same disk as the images (images are then hard-linked instead of copied).
     :param float resol_ref: resolution (m) of the orthomosaics and DSMs.
+    :param int downscale_factor_alignement, downscale_factor_depth_map: Metashape values, converted to ODM levels.
+    :param bool calibrate_col: colour calibration of the images on the tie points of the whole block.
+    :param bool check_dates: checks that the EXIF date of the images matches the date of their folder.
     :param str odm_path: native: path of run.bat / run.sh ; docker: image name ; apptainer: image file.
     :param str odm_runner: 'native', 'docker' or 'apptainer'.
-    :param list odm_args: additional ODM options, e.g. ['--matcher-neighbors', '16'].
-    :param bool overwrite: deletes existing ODM projects (block and epochs) before running. If False, the existing
-        SfM block is re-used and the epochs already finished are skipped (resume).
+    :param list odm_args: additional ODM options, e.g. ['--min-num-features', '20000'].
+    :param bool overwrite: deletes existing ODM projects (block and epochs) before running. If False, a previous
+        run with the same images and parameters is resumed (an error is raised if they differ).
     :param bool keep_project: keeps the ODM projects at the end (default: True if out_dir_project is given).
     :return: dict {epoch: path of the orthomosaic}
     """
@@ -288,11 +682,15 @@ def timesift_odm_process(pathDIR,
     if keep_project is None:
         keep_project = out_dir_project is not None
     workdir = os.path.abspath(out_dir_project) if out_dir_project else os.path.join(out_dir_ortho, '_odm_timesift_')
+    if os.path.commonpath([workdir, os.path.abspath(pathDIR)]) == os.path.abspath(pathDIR):
+        raise TimeSiftError('out_dir_project must not be inside path_in')
     if overwrite and os.path.isdir(workdir):
         shutil.rmtree(workdir)
     os.makedirs(workdir, exist_ok=True)
     if isinstance(odm_args, str):
         odm_args = odm_args.split()
+    if int(downscale_factor_alignement) not in ALIGN_QUALITY or int(downscale_factor_depth_map) not in DEPTH_QUALITY:
+        raise ValueError('downscale_factor_alignement must be in 0, 1, 2, 4, 8 and downscale_factor_depth_map in 1, 2, 4, 8, 16')
 
     options = ['--orthophoto-resolution', str(float(resol_ref) * 100),
                '--feature-quality', ALIGN_QUALITY[int(downscale_factor_alignement)],
@@ -303,37 +701,72 @@ def timesift_odm_process(pathDIR,
         options += ['--dsm', '--dem-resolution', str(float(resol_ref) * 100)]
     options += [str(a) for a in (odm_args or [])]
 
-    epochs = list_epochs(pathDIR, group_by_flight=group_by_flight, folder_names=folder_names)
+    epochs = list_epochs(pathDIR, group_by_flight=group_by_flight, folder_names=folder_names, check_dates=check_dates)
     log(f'{len(epochs)} epochs: ' + ', '.join(f'{e} ({len(i)} images)' for e, i in epochs.items()))
 
+    # a previous run in workdir is only resumed if it was made with the same images and parameters
+    params = {'images': {e: sorted(n for _, n in i) for e, i in epochs.items()},
+              'options': options, 'calibrate_col': bool(calibrate_col)}
+    params_path = os.path.join(workdir, PARAMS_FILE)
+    if os.listdir(workdir):
+        old = None
+        if os.path.isfile(params_path):
+            with open(params_path, encoding='utf-8') as f:
+                old = json.load(f)
+        if old != params:
+            raise TimeSiftError(f'{workdir} contains a previous run made with other images or parameters. '
+                                f'Use overwrite = TRUE to delete it, or give another out_dir_project.')
+    with open(params_path, 'w', encoding='utf-8') as f:
+        json.dump(params, f, indent=1)
+
     # 1. SfM on the multi-temporal block
-    sfm_done = os.path.join(workdir, BLOCK_NAME, 'opensfm', 'undistorted', 'reconstruction.json')
+    block_dir = os.path.join(workdir, BLOCK_NAME)
+    sfm_done = os.path.join(block_dir, 'opensfm', 'undistorted', 'reconstruction.json')
     if os.path.isfile(sfm_done):
         log('Existing SfM block found: it is re-used (use overwrite=True to recompute it)')
     else:
         prepare_block(workdir, epochs)
         code = run_odm(odm_runner, odm_path, workdir, BLOCK_NAME, options + ['--end-with', 'opensfm'])
         if not os.path.isfile(sfm_done):
-            raise RuntimeError(f'ODM failed during the SfM of the multi-temporal block (exit code {code}). '
-                               f'See {os.path.join(workdir, "odm_" + BLOCK_NAME + ".log")}')
+            raise TimeSiftError(f'ODM failed during the SfM of the multi-temporal block (exit code {code}). '
+                                f'See {os.path.join(workdir, "odm_" + BLOCK_NAME + ".log")}')
     t1 = time.time()
     log(f'SfM on the multi-temporal block done ({t1 - t0:.0f} s)')
+    all_shots = set(_stem(s) for s in _shots(sfm_done))
+    for epoch, images in epochs.items():
+        n = sum(_stem(nm) in all_shots for _, nm in images)
+        log(f'  epoch {epoch}: {n} / {len(images)} images aligned')
 
-    # 2. dense matching, DSM and orthomosaic for each epoch
+    # 2. colour calibration on the tie points of the whole block
+    gains = None
+    if calibrate_col:
+        gains, n_obs = compute_color_gains(block_dir)
+        save_color_gains(os.path.join(workdir, COLOR_FILE), gains, n_obs)
+        g = list(gains.values())
+        log(f'Colour calibration: {len(g)} images, gains from {min(min(x) for x in g):.2f} to '
+            f'{max(max(x) for x in g):.2f} (details in {COLOR_FILE})')
+
+    # 3. dense matching, DSM and orthomosaic for each epoch
     results = {}
     for epoch, images in epochs.items():
         te = time.time()
+        valid = {_stem(n) for _, n in images}
         ortho = os.path.join(workdir, epoch, 'odm_orthophoto', 'odm_orthophoto.tif')
         if os.path.isfile(ortho):
             log(f'Epoch {epoch}: orthomosaic already computed, skipped')
         else:
             if os.path.isdir(os.path.join(workdir, epoch)):
                 shutil.rmtree(os.path.join(workdir, epoch))        # unfinished previous run
-            make_epoch_project(workdir, epoch, images)
+            make_epoch_project(workdir, epoch, images, gains)
             code = run_odm(odm_runner, odm_path, workdir, epoch, options + ['--rerun-from', 'openmvs'])
             if not os.path.isfile(ortho):
-                raise RuntimeError(f'ODM failed for epoch {epoch} (exit code {code}). '
-                                   f'See {os.path.join(workdir, "odm_" + epoch + ".log")}')
+                raise TimeSiftError(f'ODM failed for epoch {epoch} (exit code {code}). '
+                                    f'See {os.path.join(workdir, "odm_" + epoch + ".log")}')
+        check = verify_epoch_project(workdir, epoch, valid, list(epochs))
+        if not check['ok'] or check['other']:
+            raise TimeSiftError(f'Epoch {epoch}: images of other epochs found in the project: '
+                                f'{json.dumps(check["critical"] or check["other"])}')
+        log(f'Epoch {epoch}: checked, only images of this epoch in the {len(check["checked"])} files that list images')
         out = os.path.join(out_dir_ortho, f'{site_name}{epoch}{suffix}.tif')
         shutil.copy2(ortho, out)
         results[epoch] = out
@@ -345,6 +778,8 @@ def timesift_odm_process(pathDIR,
                 log(f'WARNING: no DSM produced for epoch {epoch}')
         log(f'Epoch {epoch} finished ({time.time() - te:.0f} s)')
 
+    verify_projects(workdir, verbose=False)
+    timings_summary(workdir)
     if not keep_project:
         shutil.rmtree(workdir, ignore_errors=True)
     log(f'Complete pipeline done in {time.time() - t0:.0f} s')
@@ -364,6 +799,8 @@ def main():
     p.add_argument('--downscale_factor_alignement', type=int, default=1, choices=sorted(ALIGN_QUALITY))
     p.add_argument('--downscale_factor_depth_map', type=int, default=2, choices=sorted(DEPTH_QUALITY))
     p.add_argument('--suffix', default="")
+    p.add_argument('--no_calibrate_col', action='store_true')
+    p.add_argument('--no_check_dates', action='store_true')
     p.add_argument('--odm_path', default=None)
     p.add_argument('--odm_runner', default='native', choices=['native', 'docker', 'apptainer'])
     p.add_argument('--overwrite', action='store_true')
@@ -374,6 +811,7 @@ def main():
                          group_by_flight=args.group_by_flight,
                          downscale_factor_alignement=args.downscale_factor_alignement,
                          downscale_factor_depth_map=args.downscale_factor_depth_map, suffix=args.suffix,
+                         calibrate_col=not args.no_calibrate_col, check_dates=not args.no_check_dates,
                          odm_path=args.odm_path, odm_runner=args.odm_runner, odm_args=odm_args,
                          overwrite=args.overwrite, keep_project=True if args.keep_project else None)
 
