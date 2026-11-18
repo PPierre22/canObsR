@@ -680,6 +680,57 @@ def save_color_gains(path, gains, n_obs):
             f.write(f'{k},{epoch_of(k)},{g[0]:.4f},{g[1]:.4f},{g[2]:.4f},{n_obs.get(k, 0)}\n')
 
 
+def write_tiff(path, arr):
+    """
+    Writes an image (H x W x C uint8 / uint16 array) as an uncompressed baseline TIFF, with the SampleFormat
+    tag: the texturing step of ODM (texrecon, MVE load_tiff_file_headers) reads this tag without default value
+    and refuses the file when it is missing ("Cannot determine image format"), which is the case of the TIFF
+    files written by Pillow. Python standard library only.
+    """
+    if arr.ndim == 2:
+        arr = arr[:, :, None]
+    h, w, c = arr.shape
+    bits = arr.dtype.itemsize * 8
+    data = arr.astype(arr.dtype.newbyteorder('<'), copy=False).tobytes()
+    if len(data) >= 2 ** 32 - 4096:
+        raise TimeSiftError(f'Image too large for a classic TIFF: {path}')
+    entries = []                                     # (tag, type, count, values); SHORT = 3, LONG = 4
+    extra = b''
+    n_entries = 11 + (1 if c in (2, 4) else 0)
+    ifd_size = 2 + 12 * n_entries + 4
+    extra_offset = 8 + ifd_size
+
+    def short_array(values):
+        nonlocal extra
+        if len(values) <= 2:
+            return values
+        off = extra_offset + len(extra)
+        extra += struct.pack('<%dH' % len(values), *values)
+        return off
+
+    bps = short_array([bits] * c)
+    sfm = short_array([1] * c)                       # SampleFormat: unsigned integer
+    data_offset = extra_offset + len(extra)
+    entries = [(256, 4, 1, [w]), (257, 4, 1, [h]), (258, 3, c, bps), (259, 3, 1, [1]),
+               (262, 3, 1, [2 if c >= 3 else 1]), (273, 4, 1, [data_offset]), (277, 3, 1, [c]),
+               (278, 4, 1, [h]), (279, 4, 1, [len(data)]), (284, 3, 1, [1])]
+    if c in (2, 4):
+        entries.append((338, 3, 1, [2]))             # ExtraSamples: unassociated alpha
+    entries.append((339, 3, c, sfm))
+    ifd = struct.pack('<H', len(entries))
+    for tag, typ, count, val in entries:
+        if isinstance(val, int):                     # offset to an array
+            ifd += struct.pack('<HHII', tag, typ, count, val)
+        elif typ == 3:
+            v = list(val) + [0] * (2 - len(val))
+            ifd += struct.pack('<HHIHH', tag, typ, count, v[0], v[1])
+        else:
+            ifd += struct.pack('<HHII', tag, typ, count, val[0])
+    ifd += struct.pack('<I', 0)
+    with open(path, 'wb') as f:
+        f.write(b'II*\x00' + struct.pack('<I', 8) + ifd + extra + data)
+
+
 def apply_gain(src, dst, gain):
     """Writes a colour-corrected copy of an image (the source, possibly hard-linked, is not modified)."""
     import numpy as np
@@ -688,32 +739,23 @@ def apply_gain(src, dst, gain):
         Image.MAX_IMAGE_PIXELS = None
         with Image.open(src) as im:
             arr = np.asarray(im)
-        mode = None
     except Exception:
         from osgeo import gdal
         ds = gdal.Open(src)
-        arr = np.moveaxis(ds.ReadAsArray(), 0, -1)
+        arr = ds.ReadAsArray()
+        arr = np.moveaxis(arr, 0, -1) if arr.ndim == 3 else arr
         ds = None
-        mode = 'gdal'
     out = arr.astype(np.float32)
-    for c in range(min(3, out.shape[-1])):
-        out[..., c] *= gain[c]
+    if out.ndim == 3:
+        for c in range(min(3, out.shape[-1])):
+            out[..., c] *= gain[c]
     vmax = np.iinfo(arr.dtype).max if np.issubdtype(arr.dtype, np.integer) else None
     if vmax is not None:
         out = np.clip(np.rint(out), 0, vmax)
     out = out.astype(arr.dtype)
     if os.path.exists(dst):
         os.remove(dst)
-    if mode is None:
-        from PIL import Image
-        Image.fromarray(out).save(dst)
-    else:
-        from osgeo import gdal
-        drv = gdal.GetDriverByName('GTiff')
-        ds = drv.Create(dst, out.shape[1], out.shape[0], out.shape[2], gdal.GDT_Byte if out.dtype == np.uint8 else gdal.GDT_UInt16)
-        for c in range(out.shape[2]):
-            ds.GetRasterBand(c + 1).WriteArray(out[..., c])
-        ds = None
+    write_tiff(dst, out)
 
 
 # ---------------------------------------------------------------------------------------------
