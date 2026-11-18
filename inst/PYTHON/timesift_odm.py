@@ -381,11 +381,16 @@ def read_images_epochs(workdir):
     return out
 
 
-def filter_reconstruction(path, valid_stems):
-    """Removes from an OpenSfM reconstruction.json the shots (and rig instances) of the other epochs."""
+def filter_reconstruction(path, valid_stems, keep_points=None):
+    """
+    Removes from an OpenSfM reconstruction.json the shots (and rig instances) of the other epochs.
+    keep_points: if given, only the 3D points whose track id is in this set are kept.
+    """
     reconstructions = _read_json(path)
     n = 0
     for rec in reconstructions:
+        if keep_points is not None and 'points' in rec:
+            rec['points'] = {k: v for k, v in rec['points'].items() if str(k) in keep_points}
         shots = rec.get('shots', {})
         for key in list(shots):
             if _stem(key) not in valid_stems:
@@ -407,15 +412,19 @@ def filter_tracks(path, valid_stems):
     Keeps in an OpenSfM tracks.csv the observations of the epoch only.
     Without it, the observations of the other epochs are given to the first image of the epoch when the
     sparse points are exported to OpenMVS (std::map default value in OpenSfM openmvs_exporter.h).
+    Returns the ids of the tracks seen in at least 2 images of the epoch.
     """
     tmp = path + '.tmp'
+    n_obs = {}
     with open(tmp, 'wb') as fout:
         fout.write(tracks_header(path))
-        for image, _, _, raw in iter_tracks(path):
+        for image, track, _, raw in iter_tracks(path):
             if _stem(image) in valid_stems:
                 fout.write(raw)
+                n_obs[track] = n_obs.get(track, 0) + 1
     shutil.move(path, path + '.bak')
     shutil.move(tmp, path)
+    return {t for t, n in n_obs.items() if n >= 2}
 
 
 def filter_nvm(path, valid_stems):
@@ -456,6 +465,11 @@ def make_epoch_project(workdir, epoch, images, gains=None):
         return [n for n in names if os.path.join(folder, n) in heavy or n.endswith('.bak')]
 
     shutil.copytree(block, dst, ignore=ignore)
+    # ODM considers that feature detection and matching are done if these folders exist (opendm/osfm.py,
+    # is_feature_matching_done). Their content is not used after the SfM: empty folders are enough, otherwise
+    # ODM detects and matches the features again for each epoch.
+    for d in ('features', 'matches'):
+        os.makedirs(os.path.join(dst, 'opensfm', d), exist_ok=True)
 
     # raw images of the epoch: links
     os.makedirs(os.path.join(dst, 'images'))
@@ -473,14 +487,16 @@ def make_epoch_project(workdir, epoch, images, gains=None):
                 _link_or_copy(os.path.join(und_src, f), os.path.join(und_dst, f))
 
     osfm = os.path.join(dst, 'opensfm')
-    n = filter_reconstruction(os.path.join(osfm, 'undistorted', 'reconstruction.json'), valid)
+    # tracks first: the 3D points kept are the ones seen in at least 2 images of the epoch (OpenSfM
+    # export_openmvs fails on a point whose track is not in tracks.csv)
+    tracks = os.path.join(osfm, 'undistorted', 'tracks.csv')
+    keep = filter_tracks(tracks, valid) if os.path.isfile(tracks) else None
+    n = filter_reconstruction(os.path.join(osfm, 'undistorted', 'reconstruction.json'), valid, keep_points=keep)
     if n == 0:
         raise TimeSiftError(f'Epoch {epoch}: none of its {len(images)} images was aligned by the SfM')
     log(f'Epoch {epoch}: {n} aligned cameras out of {len(images)} images')
     if os.path.isfile(os.path.join(osfm, 'reconstruction.json')):
         filter_reconstruction(os.path.join(osfm, 'reconstruction.json'), valid)
-    if os.path.isfile(os.path.join(osfm, 'undistorted', 'tracks.csv')):
-        filter_tracks(os.path.join(osfm, 'undistorted', 'tracks.csv'), valid)
     if os.path.isfile(os.path.join(osfm, 'undistorted', 'reconstruction.nvm')):
         filter_nvm(os.path.join(osfm, 'undistorted', 'reconstruction.nvm'), valid)
     if os.path.isfile(os.path.join(dst, 'images.json')):
