@@ -7,8 +7,11 @@
 #' @details
 #' With `engine = "odm"`:
 #' * only RGB images are handled for now (`data_type`, `sun_sensor` and `from_mesh` are not used);
-#' * without `group_by_flight`, the subfolders of `path_in` without a date in their name are ignored, and an error is
-#'   raised if an image is found twice, or if the EXIF date of an image does not match the date of its folder (`check_dates`);
+#' * without `group_by_flight`, the subfolders of `path_in` without a date in their name are ignored;
+#' * the folder defines the date: all the images of a folder make one mosaic, even if some were taken on another day
+#'   (e.g. a flight finished the next day). The EXIF days are only reported (`check_dates`); use [check_flights()] to
+#'   check the folders before processing;
+#' * an error is raised if the same image file is found twice (e.g. a copy of the images inside `path_in`);
 #' * `downscale_factor_alignement` and `downscale_factor_depth_map` are converted to the ODM levels that use the same
 #'   image resolution as Metashape (ODM `--feature-quality` and `--pc-quality`);
 #' * `calibrate_col = TRUE` computes one gain per image and per colour channel so that the tie points of the whole
@@ -45,7 +48,8 @@
 #' @param odm_runner character. How ODM is launched: "native" (default), "docker" or "apptainer" (clusters).
 #' @param odm_args character vector. Additional options passed to ODM, e.g. `c("--matcher-neighbors", "16")`.
 #' @param overwrite logical. Only for `engine = "odm"`. Deletes the existing ODM projects before running, instead of resuming.
-#' @param check_dates logical. Only for `engine = "odm"`. Checks that the EXIF date of every image matches the date of its folder.
+#' @param check_dates logical. Only for `engine = "odm"`. Reports the folders whose images were taken on several days or
+#'   on another day than the folder date (information only, never an error).
 #' @param tempdir_custom character. Only for `engine = "odm"`. Directory for the temporary files (R terra, GDAL and ODM).
 #'   Default: the option `canObsR.tempdir` if set (`options(canObsR.tempdir = "D:/tmp")`), otherwise a `_tmp` folder in
 #'   `out_dir_project` (or in `out_dir_ortho`). Large temporary files are written during the post-processing of the

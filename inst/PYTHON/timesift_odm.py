@@ -178,15 +178,34 @@ def tracks_header(path):
 # 1. Images and epochs
 # ---------------------------------------------------------------------------------------------
 
-def exif_date(path, nbytes=131072):
-    """Date (YYYYMMDD) of the first EXIF date-time found in the image header, None if not found."""
+def exif_info(path, nbytes=131072):
+    """
+    Date-time of acquisition ('YYYY:MM:DD HH:MM:SS', DateTimeOriginal, else DateTime) and presence of GPS tags,
+    read with Pillow if available; otherwise the first date-time found in the image header. (None, None) if unknown.
+    """
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            exif = im.getexif()
+            dt = exif.get_ifd(0x8769).get(36867) or exif.get(306)       # DateTimeOriginal, DateTime
+            gps = bool(exif.get_ifd(0x8825))
+        if dt:
+            return str(dt).strip('\x00 '), gps
+    except Exception:
+        pass
     try:
         with open(path, 'rb') as f:
             head = f.read(nbytes)
     except OSError:
-        return None
-    m = re.search(rb'((?:19|20)\d{2}):(\d{2}):(\d{2}) \d{2}:\d{2}:\d{2}', head)
-    return (m.group(1) + m.group(2) + m.group(3)).decode() if m else None
+        return None, None
+    m = re.search(rb'(?:19|20)\d{2}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}', head)
+    return (m.group().decode(), None) if m else (None, None)
+
+
+def exif_date(path):
+    """Day of acquisition (YYYYMMDD) from the EXIF, None if not found."""
+    dt, _ = exif_info(path)
+    return dt[:10].replace(':', '') if dt else None
 
 
 def _fingerprint(path, nbytes=262144):
@@ -205,10 +224,12 @@ def list_epochs(path_in, group_by_flight=False, folder_names=None, check_dates=T
     (YYYYMMDD or YYYYMM found in the flight folder name, default) or a flight (group_by_flight).
     Without group_by_flight, sub-folders without a date in their name are ignored (with a warning).
 
-    Safety checks (errors):
-      - check_dates: the EXIF date of every image must match the date of its folder;
-      - check_duplicates: the same image file cannot be found twice (e.g. a copy of the images in a
-        working folder inside path_in).
+    The folder defines the epoch: all its images make one mosaic, whatever their EXIF dates (a flight can be
+    finished on another day, e.g. after rain). With check_dates, the EXIF days found in each folder are only
+    reported (no error); see flights_report() / check_flights() for a complete check before processing.
+
+    Error: the same image file found twice (check_duplicates), e.g. a copy of the images in a working folder
+    inside path_in: it would be used twice, possibly in two epochs.
 
     Returns a dict {epoch: [(source_path, new_name), ...]}, new_name = "<epoch>__<original name>".
     """
@@ -221,7 +242,7 @@ def list_epochs(path_in, group_by_flight=False, folder_names=None, check_dates=T
         flights = list(folder_names)
 
     epochs, used, ignored = {}, set(), []
-    date_errors, seen, duplicates = [], {}, []
+    days, seen, duplicates = {}, {}, []
     for flight in flights:
         if flight in RESERVED or flight.startswith(('.', '_')):
             ignored.append(flight)
@@ -246,10 +267,10 @@ def list_epochs(path_in, group_by_flight=False, folder_names=None, check_dates=T
                         duplicates.append((seen[fp], src))
                         continue
                     seen[fp] = src
-                if check_dates and m:
-                    d = exif_date(src)
-                    if d is not None and not d.startswith(m.group()):
-                        date_errors.append(f'{src}: EXIF date {d}, folder date {m.group()}')
+                if check_dates:
+                    d = exif_date(src) or 'unknown'
+                    days.setdefault(flight, {}).setdefault(d, 0)
+                    days[flight][d] += 1
                 stem, ext = os.path.splitext(f)
                 new = f'{epoch}{SEP}{_safe(stem)}'
                 i = 1
@@ -265,16 +286,94 @@ def list_epochs(path_in, group_by_flight=False, folder_names=None, check_dates=T
         raise TimeSiftError(f'{len(duplicates)} image(s) found twice in {path_in}, e.g.:\n  '
                             + '\n  '.join(f'{a}  ==  {b}' for a, b in duplicates[:5])
                             + '\nRemove the copies (each image must be in the folder of its flight only).')
-    if date_errors:
-        raise TimeSiftError(f'{len(date_errors)} image(s) whose EXIF date does not match the date of their folder, e.g.:\n  '
-                            + '\n  '.join(date_errors[:10])
-                            + '\nCheck the folders, or use check_dates = FALSE if the folder dates are right.')
+    for flight, d in days.items():                     # information only: the folder defines the epoch
+        m = re.search(DATE_PATTERN, flight)
+        if len(d) > 1 or (m and not all(k.startswith(m.group()) for k in d)):
+            log(f'Note: {flight}: images taken on ' + ', '.join(f'{k} ({n})' for k, n in sorted(d.items()))
+                + ' -> all used for the mosaic of this folder')
     if not epochs:
         raise TimeSiftError(f'No image found in dated sub-folders of {path_in}')
     for epoch in epochs:
         if any(epoch != e and (epoch + SEP).startswith(e + SEP) for e in epochs):
             raise TimeSiftError(f'Ambiguous epoch names: {epoch}')
     return epochs
+
+
+def flights_report(path_in, folder_names=None, check_duplicates=True):
+    """
+    Report on the image folders before processing (no error, no change). For each image: folder, epoch as
+    generate_Mosa() would build it, EXIF date-time, GPS tags, identical copies elsewhere.
+    Returns a list of dicts (one per image) and a list of dicts (one per folder).
+    """
+    path_in = os.path.abspath(path_in)
+    if folder_names is None:
+        flights = sorted(d for d in os.listdir(path_in) if os.path.isdir(os.path.join(path_in, d)))
+    else:
+        flights = [folder_names] if isinstance(folder_names, str) else list(folder_names)
+    images, seen = [], {}
+    for flight in flights:
+        m = re.search(DATE_PATTERN, flight)
+        for dirpath, dirnames, filenames in os.walk(os.path.join(path_in, flight)):
+            dirnames[:] = sorted(dirnames)
+            for f in sorted(filenames):
+                if not f.lower().endswith(IMG_EXT):
+                    continue
+                src = os.path.join(dirpath, f)
+                dt, gps = exif_info(src)
+                rec = {'folder': flight, 'file': os.path.relpath(src, path_in),
+                       'folder_date': m.group() if m else None,
+                       'exif_datetime': dt, 'exif_day': dt[:10].replace(':', '') if dt else None,
+                       'gps': gps, 'duplicate_of': None}
+                if check_duplicates:
+                    fp = _fingerprint(src)
+                    if fp in seen:
+                        rec['duplicate_of'] = seen[fp]
+                    else:
+                        seen[fp] = rec['file']
+                images.append(rec)
+    folders = []
+    for flight in flights:
+        im = [r for r in images if r['folder'] == flight]
+        m = re.search(DATE_PATTERN, flight)
+        ignored = flight in RESERVED or flight.startswith(('.', '_')) or not m
+        d = {}
+        for r in im:
+            d[r['exif_day'] or 'unknown'] = d.get(r['exif_day'] or 'unknown', 0) + 1
+        known = sorted(k for k in d if k != 'unknown')
+        times = sorted(r['exif_datetime'] for r in im if r['exif_datetime'])
+        notes = []
+        if ignored:
+            notes.append('ignored by generate_Mosa (no date in the folder name, or reserved name)')
+        if not im:
+            notes.append('no image')
+        if 'unknown' in d:
+            notes.append(f"{d['unknown']} image(s) without EXIF date")
+        if len(known) > 1:
+            notes.append(f'images taken on {len(known)} days (all used for one mosaic)')
+        if m and known and not any(k.startswith(m.group()) for k in known):
+            notes.append('no image taken on the date of the folder name')
+        elif m and known and not all(k.startswith(m.group()) for k in known):
+            notes.append('some images taken on another day than the folder date')
+        n_dup = sum(r['duplicate_of'] is not None for r in im)
+        if n_dup:
+            notes.append(f'{n_dup} image(s) identical to another file (generate_Mosa would stop)')
+        n_nogps = sum(r['gps'] is False for r in im)
+        if n_nogps:
+            notes.append(f'{n_nogps} image(s) without GPS tags')
+        folders.append({'folder': flight, 'folder_date': m.group() if m else None,
+                        'epoch': None if ignored else m.group(), 'n_images': len(im),
+                        'exif_days': '; '.join(f'{k} ({n})' for k, n in sorted(d.items())),
+                        'n_days': len(known), 'first_shot': times[0] if times else None,
+                        'last_shot': times[-1] if times else None,
+                        'n_duplicates': n_dup, 'n_no_gps': n_nogps,
+                        'status': 'ok' if not notes else ('ignored' if ignored else 'check'),
+                        'notes': '; '.join(notes)})
+    epochs = [f['epoch'] for f in folders if f['epoch']]
+    for f in folders:
+        if f['epoch'] and epochs.count(f['epoch']) > 1:
+            f['notes'] = '; '.join(x for x in (f['notes'], 'other folder(s) with the same date: merged into one mosaic') if x)
+            f['status'] = 'check'
+    return images, folders
 
 
 # ---------------------------------------------------------------------------------------------
@@ -797,7 +896,7 @@ def timesift_odm_process(pathDIR,
     :param float resol_ref: resolution (m) of the orthomosaics and DSMs.
     :param int downscale_factor_alignement, downscale_factor_depth_map: Metashape values, converted to ODM levels.
     :param bool calibrate_col: colour calibration of the images on the tie points of the whole block.
-    :param bool check_dates: checks that the EXIF date of the images matches the date of their folder.
+    :param bool check_dates: reports the EXIF days of the images of each folder (information only, no error).
     :param str odm_path: native: path of run.bat / run.sh ; docker: image name ; apptainer: image file.
     :param str odm_runner: 'native', 'docker' or 'apptainer'.
     :param list odm_args: additional ODM options, e.g. ['--min-num-features', '20000'].
