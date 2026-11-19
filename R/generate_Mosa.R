@@ -46,6 +46,11 @@
 #' @param odm_args character vector. Additional options passed to ODM, e.g. `c("--matcher-neighbors", "16")`.
 #' @param overwrite logical. Only for `engine = "odm"`. Deletes the existing ODM projects before running, instead of resuming.
 #' @param check_dates logical. Only for `engine = "odm"`. Checks that the EXIF date of every image matches the date of its folder.
+#' @param tempdir_custom character. Only for `engine = "odm"`. Directory for the temporary files (R terra, GDAL and ODM).
+#'   Default: the option `canObsR.tempdir` if set (`options(canObsR.tempdir = "D:/tmp")`), otherwise a `_tmp` folder in
+#'   `out_dir_project` (or in `out_dir_ortho`). Large temporary files are written during the post-processing of the
+#'   orthomosaics: this folder should be on a disk with free space (not the system disk). A subfolder is created in it
+#'   and deleted at the end.
 #'
 #' @export
 #' @importFrom reticulate source_python
@@ -100,7 +105,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                        suffix = "", folder_names = NULL,
                        engine = c("odm", "metashape"),
                        odm_path = NULL, odm_runner = c("native", "docker", "apptainer"),
-                       odm_args = NULL, overwrite = FALSE, check_dates = TRUE) {
+                       odm_args = NULL, overwrite = FALSE, check_dates = TRUE,
+                       tempdir_custom = getOption("canObsR.tempdir", NULL)) {
 
    engine <- match.arg(engine)
    py <- new.env()
@@ -131,6 +137,25 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
 
    # ---- engine = "odm" ----
    odm_runner <- match.arg(odm_runner)
+
+   # temporary files (terra, GDAL, ODM) in tempdir_custom, not in the R temporary folder of the system disk
+   if (is.null(tempdir_custom)) {
+      tempdir_custom <- file.path(if (is.null(out_dir_project)) out_dir_ortho else out_dir_project, "_tmp")
+   }
+   dir.create(tempdir_custom, recursive = TRUE, showWarnings = FALSE)
+   tmp_sub <- normalizePath(tempfile("canobs_", tmpdir = tempdir_custom), winslash = "/", mustWork = FALSE)
+   dir.create(tmp_sub)
+   old_terra <- terra::terraOptions(print = FALSE)$tempdir
+   old_env <- Sys.getenv(c("TMPDIR", "TMP", "TEMP", "CPL_TMPDIR"), unset = NA)
+   terra::terraOptions(tempdir = tmp_sub)
+   Sys.setenv(TMPDIR = tmp_sub, TMP = tmp_sub, TEMP = tmp_sub, CPL_TMPDIR = tmp_sub)
+   on.exit({
+      terra::tmpFiles(current = TRUE, orphan = FALSE, old = FALSE, remove = TRUE)
+      terra::terraOptions(tempdir = old_terra)
+      for (v in names(old_env)) if (is.na(old_env[[v]])) Sys.unsetenv(v) else do.call(Sys.setenv, as.list(old_env[v]))
+      unlink(tmp_sub, recursive = TRUE)
+   }, add = TRUE)
+   message("Temporary files in ", tmp_sub)
    if (data_type != "RGB") {
       stop("engine = 'odm' only handles RGB images for now. Use engine = 'metashape' for multispectral images.")
    }
@@ -161,7 +186,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                                   odm_args = as.list(as.character(odm_args)),
                                   overwrite = overwrite,
                                   calibrate_col = calibrate_col,
-                                  check_dates = check_dates
+                                  check_dates = check_dates,
+                                  tmp_dir = tmp_sub
                                   )
 
    # same format as the Metashape outputs: RGB, white background, resol_ref grid, crs
@@ -184,32 +210,45 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
 .format_odm_raster <- function(f, crs, res, type = c("ortho", "dem")) {
    type <- match.arg(type)
    r <- terra::rast(f)
-   if (type == "ortho") {
-      if (terra::nlyr(r) >= 4) {
-         r <- terra::mask(r[[1:3]], r[[4]], maskvalues = 0)
-      } else {
-         r <- r[[1:3]]
-      }
-   }
    # template: target crs, grid aligned on multiples of res
    e <- terra::ext(terra::project(terra::as.polygons(terra::ext(r), crs = terra::crs(r)), crs))
    e <- terra::ext(floor(e$xmin / res) * res, ceiling(e$xmax / res) * res,
                    floor(e$ymin / res) * res, ceiling(e$ymax / res) * res)
    tmpl <- terra::rast(e, resolution = res, crs = crs)
-   tmp <- paste0(tools::file_path_sans_ext(f), "_canobs_tmp.tif")
    gdal <- c("COMPRESS=LZW", "BIGTIFF=IF_SAFER", "TILED=YES")
+   out <- paste0(tools::file_path_sans_ext(f), "_canobs_tmp.tif")
    if (type == "ortho") {
-      out <- terra::project(r, tmpl, method = "bilinear")
-      out <- terra::classify(round(out), cbind(NA, 255))
-      terra::writeRaster(out, tmp, datatype = "INT1U", gdal = gdal, overwrite = TRUE, NAflag = NA)
+      # 1. reprojection / resampling of the 4 bands (RGB + alpha), written compressed next to the output
+      proj <- paste0(tools::file_path_sans_ext(f), "_canobs_proj.tif")
+      if (terra::nlyr(r) >= 4) {
+         # the alpha band defines the no-data area: a no-data value declared in the file (e.g. 255) is ignored,
+         # through a small virtual file (VRT) written in the temporary folder
+         vrt <- tempfile(fileext = ".vrt", tmpdir = terra::terraOptions(print = FALSE)$tempdir)
+         sf::gdal_utils("translate", f, vrt, options = c("-of", "VRT", "-a_nodata", "none"))
+         r <- terra::rast(vrt)
+      } else {
+         r <- c(r[[1:3]], terra::init(r[[1]], 255))
+      }
+      # (INT2U: 0-255 values and a separate no-data value, 65535)
+      terra::project(r[[1:4]], tmpl, method = "bilinear", filename = proj, overwrite = TRUE,
+                     wopt = list(datatype = "INT2U", gdal = gdal))
+      # 2. alpha removed, white (255) where there is no data, as in the Metashape outputs
+      white_bg <- function(r, g, b, a) {
+         rgb <- round(cbind(r, g, b))
+         rgb[is.na(a) | a < 128 | is.na(rgb[, 1]), ] <- 255
+         rgb
+      }
+      terra::lapp(terra::rast(proj), white_bg, filename = out, overwrite = TRUE,
+                  wopt = list(datatype = "INT1U", gdal = gdal, NAflag = NA, names = c("red", "green", "blue")))
+      unlink(proj)
    } else {
-      out <- terra::project(r, tmpl, method = "bilinear")
-      terra::writeRaster(out, tmp, datatype = "FLT4S", gdal = gdal, overwrite = TRUE)
+      terra::project(r, tmpl, method = "bilinear", filename = out, overwrite = TRUE,
+                     wopt = list(datatype = "FLT4S", gdal = gdal))
    }
-   rm(r, out)
+   rm(r)
    gc()
    file.remove(f)
-   file.rename(tmp, f)
+   file.rename(out, f)
    invisible(f)
 }
 

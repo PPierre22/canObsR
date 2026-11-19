@@ -44,6 +44,7 @@ SEP = '__'                      # separator between the epoch and the original i
 RESERVED = {BLOCK_NAME, 'time-sift-block'}
 PARAMS_FILE = 'canobs_timesift_params.json'
 TIMINGS_FILE = 'timings.csv'
+TMP_NAME = '_tmp'               # default folder of the temporary files, created by generate_Mosa() in out_dir_project
 COLOR_FILE = 'color_gains.csv'
 
 # Metashape downscale factors -> ODM quality levels, at the same image resolution:
@@ -302,7 +303,7 @@ STAGE_RE = re.compile(r'\[INFO\]\s+(Running|Finished) (\S+) stage')
 GPU_RE = re.compile(r'(?i)\b(gpu|cuda)\b')
 
 
-def run_odm(runner, odm_path, datasets_dir, project, options):
+def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
     """Runs ODM, writes its log in datasets_dir/odm_<project>.log and the time spent in each stage in timings.csv."""
     cmd = odm_command(runner, odm_path, datasets_dir, project, options)
     log('Running: ' + ' '.join(cmd))
@@ -310,6 +311,9 @@ def run_odm(runner, odm_path, datasets_dir, project, options):
     # ODM is run with its own python: it must not inherit the python environment of the caller (conda, reticulate)
     for var in ('PYTHONPATH', 'PYTHONHOME'):
         env.pop(var, None)
+    if tmp_dir:                                # temporary files of ODM and of the tools it runs (GDAL, PDAL...)
+        os.makedirs(tmp_dir, exist_ok=True)
+        env.update(TMP=tmp_dir, TEMP=tmp_dir, TMPDIR=tmp_dir, CPL_TMPDIR=tmp_dir)
     started, gpu_lines = {}, []
     timings = os.path.join(datasets_dir, TIMINGS_FILE)
     new_file = not os.path.isfile(timings)
@@ -780,6 +784,7 @@ def timesift_odm_process(pathDIR,
                          odm_args=None,
                          overwrite=False,
                          keep_project=None,
+                         tmp_dir=None,
                          ):
     """
     Complete Time-SIFT process with ODM: one orthomosaic (and optionally one DSM) per date or per flight.
@@ -799,6 +804,7 @@ def timesift_odm_process(pathDIR,
     :param bool overwrite: deletes existing ODM projects (block and epochs) before running. If False, a previous
         run with the same images and parameters is resumed (an error is raised if they differ).
     :param bool keep_project: keeps the ODM projects at the end (default: True if out_dir_project is given).
+    :param str tmp_dir: directory for the temporary files of ODM (default: the system one).
     :return: dict {epoch: path of the orthomosaic}
     """
     t0 = time.time()
@@ -815,7 +821,11 @@ def timesift_odm_process(pathDIR,
     if os.path.commonpath([workdir, os.path.abspath(pathDIR)]) == os.path.abspath(pathDIR):
         raise TimeSiftError('out_dir_project must not be inside path_in')
     if overwrite and os.path.isdir(workdir):
-        shutil.rmtree(workdir)
+        for e in os.listdir(workdir):                  # everything except the folder of temporary files
+            if e == TMP_NAME:
+                continue
+            path = os.path.join(workdir, e)
+            shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
     os.makedirs(workdir, exist_ok=True)
     if isinstance(odm_args, str):
         odm_args = odm_args.split()
@@ -838,7 +848,7 @@ def timesift_odm_process(pathDIR,
     params = {'images': {e: sorted(n for _, n in i) for e, i in epochs.items()},
               'options': options, 'calibrate_col': bool(calibrate_col)}
     params_path = os.path.join(workdir, PARAMS_FILE)
-    if os.listdir(workdir):
+    if [e for e in os.listdir(workdir) if e != TMP_NAME]:
         old = None
         if os.path.isfile(params_path):
             with open(params_path, encoding='utf-8') as f:
@@ -856,7 +866,7 @@ def timesift_odm_process(pathDIR,
         log('Existing SfM block found: it is re-used (use overwrite=True to recompute it)')
     else:
         prepare_block(workdir, epochs)
-        code = run_odm(odm_runner, odm_path, workdir, BLOCK_NAME, options + ['--end-with', 'opensfm'])
+        code = run_odm(odm_runner, odm_path, workdir, BLOCK_NAME, options + ['--end-with', 'opensfm'], tmp_dir)
         if not os.path.isfile(sfm_done):
             raise TimeSiftError(f'ODM failed during the SfM of the multi-temporal block (exit code {code}). '
                                 f'See {os.path.join(workdir, "odm_" + BLOCK_NAME + ".log")}')
@@ -888,7 +898,7 @@ def timesift_odm_process(pathDIR,
             if os.path.isdir(os.path.join(workdir, epoch)):
                 shutil.rmtree(os.path.join(workdir, epoch))        # unfinished previous run
             make_epoch_project(workdir, epoch, images, gains)
-            code = run_odm(odm_runner, odm_path, workdir, epoch, options + ['--rerun-from', 'openmvs'])
+            code = run_odm(odm_runner, odm_path, workdir, epoch, options + ['--rerun-from', 'openmvs'], tmp_dir)
             if not os.path.isfile(ortho):
                 raise TimeSiftError(f'ODM failed for epoch {epoch} (exit code {code}). '
                                     f'See {os.path.join(workdir, "odm_" + epoch + ".log")}')
