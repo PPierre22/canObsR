@@ -8,6 +8,7 @@
 # =====================================================================================================
 
 lib_dev <- "D:/canObsR/Rlib_dev"
+# install.packages("D:/canObsR/canObsR_0.0.0.9009_odm.tar.gz", repos = NULL, type = "source", lib = lib_dev)  # once, R restarted
 library(canObsR, lib.loc = lib_dev)
 library(reticulate)
 use_condaenv("C:/ProgramData/miniconda3/envs/arosics", required = TRUE)   # with Metashape API and arosics
