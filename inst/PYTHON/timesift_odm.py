@@ -43,6 +43,8 @@ BLOCK_NAME = 'timesift_block'
 SEP = '__'                      # separator between the epoch and the original image name
 RESERVED = {BLOCK_NAME, 'time-sift-block'}
 PARAMS_FILE = 'canobs_timesift_params.json'
+EPOCH_PARAMS_FILE = 'canobs_epoch_params.json'   # parameters used for the products of an epoch project
+DENSE_OPTIONS = {'--pc-quality': 1, '--dsm': 0, '--dem-resolution': 1}   # ODM options used after the SfM only
 TIMINGS_FILE = 'timings.csv'
 TMP_NAME = '_tmp'               # default folder of the temporary files, created by generate_Mosa() in out_dir_project
 COLOR_FILE = 'color_gains.csv'
@@ -609,6 +611,33 @@ def make_epoch_project(workdir, epoch, images, gains=None):
         filter_images_db(os.path.join(dst, 'images.json'), valid)
 
 
+def retexture_epoch(workdir, epoch, images, gains=None):
+    """
+    Replaces the undistorted images of an epoch project by new ones (colour-corrected with gains, or the original
+    ones), and deletes the texture and the orthomosaic, so that ODM can be run again from the texturing step only:
+    the alignment, the point cloud and the mesh are kept.
+    """
+    block = os.path.join(workdir, BLOCK_NAME)
+    dst = os.path.join(workdir, epoch)
+    valid = {_stem(name) for _, name in images}
+    und_src = os.path.join(block, 'opensfm', 'undistorted', 'images')
+    und_dst = os.path.join(dst, 'opensfm', 'undistorted', 'images')
+    for f in os.listdir(und_src):
+        if _stem(f) in valid:
+            d = os.path.join(und_dst, f)
+            if os.path.exists(d):
+                os.remove(d)                             # (a hard link: the block image is not modified)
+            if gains is not None and _stem(f) in gains:
+                apply_gain(os.path.join(und_src, f), d, gains[_stem(f)])
+            else:
+                _link_or_copy(os.path.join(und_src, f), d)
+    for sub in ('odm_texturing', 'odm_texturing_25d', 'odm_orthophoto'):
+        if os.path.isdir(os.path.join(dst, sub)):
+            shutil.rmtree(os.path.join(dst, sub))
+    if os.path.isfile(os.path.join(dst, EPOCH_PARAMS_FILE)):
+        os.remove(os.path.join(dst, EPOCH_PARAMS_FILE))
+
+
 # ---------------------------------------------------------------------------------------------
 # 4. Checks: no image of another epoch in an epoch project
 # ---------------------------------------------------------------------------------------------
@@ -719,19 +748,50 @@ def verify_projects(workdir, verbose=True):
 # 5. Colour calibration (equivalent of Metashape calibrateColors on tie points)
 # ---------------------------------------------------------------------------------------------
 
-def compute_color_gains(block_dir, max_obs=3000000, seed=0):
+def _fit_gains(I, T, L, n_img, n_iter=30):
     """
-    One gain per image and per channel, so that the tie points of the whole multi-temporal block have
-    the same colour in all the images where they are seen (images of all dates are calibrated together,
-    as in the Metashape pipeline where calibrateColors() is run on the merged Time-SIFT chunk).
-
-    Model: log(colour observed) = log(gain of the image) + log(colour of the tie point), fitted by
-    alternating least squares with removal of outliers; the mean of the log gains is 0 for each channel
-    (the overall brightness and colour balance of the block are kept).
-    Tie point colours come from OpenSfM tracks.csv (colour of the image at the feature location).
-    Returns {image stem: (gain_r, gain_g, gain_b)}; the gain multiplies the pixel values.
+    Alternating least squares: log(colour observed) = a[image] + t[tie point], per channel, with removal of
+    outliers; the mean of a is 0 for each channel. Returns (a, weights of the observations kept).
     """
     import numpy as np
+    _, T = np.unique(T, return_inverse=True)
+    n_trk = T.max() + 1
+    a = np.zeros((n_img, 3))
+    w = np.ones(len(I), bool)
+    for it in range(n_iter):
+        cnt_t = np.maximum(np.bincount(T, w, n_trk), 1)
+        t = np.stack([np.bincount(T, w * (L[:, c] - a[I, c]), n_trk) for c in range(3)], 1) / cnt_t[:, None]
+        cnt_i = np.maximum(np.bincount(I, w, n_img), 1)
+        a = np.stack([np.bincount(I, w * (L[:, c] - t[T, c]), n_img) for c in range(3)], 1) / cnt_i[:, None]
+        seen = np.bincount(I, minlength=n_img) > 0
+        a[seen] -= a[seen].mean(0)
+        if it in (9, 19):                               # removal of outliers (3.5 robust sd)
+            r = np.abs(L - a[I] - t[T]).max(1)
+            w = r < 3.5 * 1.4826 * np.median(r[w]) + 1e-6
+    return a, w
+
+
+def compute_color_gains(block_dir, by='chunk', max_obs=3000000, seed=0):
+    """
+    One gain per image and per channel, so that the tie points have the same colour in all the images where
+    they are seen (equivalent of Metashape calibrateColors on tie points).
+
+    by = 'chunk': all the images of the multi-temporal block are calibrated together, through the tie points
+           seen in several images of the same date AND of different dates (as in the Metashape pipeline, where
+           calibrateColors() is run on the merged Time-SIFT chunk): colours are harmonised inside each mosaic and
+           between mosaics; the mean of the log gains over all the images is 0.
+    by = 'date': each date (epoch) is calibrated alone, with the tie points seen in several images of this date
+           only: colours are harmonised inside each mosaic, and the colour level of each date is kept (mean of the
+           log gains over the images of the date = 0).
+
+    Model: log(colour observed) = log(gain of the image) + log(colour of the tie point), fitted by alternating least
+    squares with removal of outliers. Tie point colours come from OpenSfM tracks.csv (colour of the image at the
+    feature location). Returns ({image stem: (gain_r, gain_g, gain_b)}, {image stem: number of observations used});
+    the gain multiplies the pixel values.
+    """
+    import numpy as np
+    if by not in ('chunk', 'date'):
+        raise ValueError("calibrate_col_by must be 'chunk' or 'date'")
 
     recs = _read_json(os.path.join(block_dir, 'opensfm', 'reconstruction.json'))
     points = {str(p) for rec in recs for p in rec.get('points', {})}
@@ -748,33 +808,35 @@ def compute_color_gains(block_dir, max_obs=3000000, seed=0):
         cols.append(tuple(float(c) for c in rgb))
     if not cols:
         raise TimeSiftError('Colour calibration: no tie point colour found in tracks.csv')
-    I, T, L = np.array(rows_i), np.array(rows_t), np.log(np.array(cols))
-    # tie points seen in at least 2 images
-    keep = np.bincount(T)[T] >= 2
-    if keep.sum() > max_obs:
-        rng = np.random.default_rng(seed)
-        tracks_kept = rng.choice(len(trk_index), size=max(1, int(len(trk_index) * max_obs / keep.sum())), replace=False)
-        mask = np.zeros(len(trk_index), bool)
-        mask[tracks_kept] = True
-        keep &= mask[T]
-    I, T, L = I[keep], T[keep], L[keep]
-    _, T = np.unique(T, return_inverse=True)
-    n_img, n_trk = len(img_index), T.max() + 1
-    a = np.zeros((n_img, 3))
-    w = np.ones(len(I), bool)
-    for it in range(30):
-        cnt_t = np.maximum(np.bincount(T, w, n_trk), 1)
-        t = np.stack([np.bincount(T, w * (L[:, c] - a[I, c]), n_trk) for c in range(3)], 1) / cnt_t[:, None]
-        cnt_i = np.maximum(np.bincount(I, w, n_img), 1)
-        a = np.stack([np.bincount(I, w * (L[:, c] - t[T, c]), n_img) for c in range(3)], 1) / cnt_i[:, None]
-        a -= a.mean(0)
-        if it in (9, 19):                               # removal of outliers (3.5 robust sd)
-            r = np.abs(L - a[I] - t[T]).max(1)
-            w = r < 3.5 * 1.4826 * np.median(r[w]) + 1e-6
-    gains = np.clip(np.exp(-a), 0.5, 2.0)
-    n_obs = np.bincount(I, w, n_img)
     names = sorted(img_index, key=img_index.get)
-    return {_stem(n): tuple(float(g) for g in gains[k]) for k, n in enumerate(names)}, \
+    I, T, L = np.array(rows_i), np.array(rows_t), np.log(np.array(cols))
+    if len(I) > max_obs:                                 # random subset of tie points
+        rng = np.random.default_rng(seed)
+        mask = np.zeros(len(trk_index), bool)
+        mask[rng.choice(len(trk_index), size=max(1, int(len(trk_index) * max_obs / len(I))), replace=False)] = True
+        I, T, L = I[mask[T]], T[mask[T]], L[mask[T]]
+
+    if by == 'chunk':
+        groups = [np.ones(len(I), bool)]
+    else:
+        img_epoch = np.array([epoch_of(n) for n in names])
+        obs_epoch = img_epoch[I]
+        groups = [obs_epoch == e for e in np.unique(img_epoch)]
+
+    a = np.zeros((len(names), 3))
+    n_obs = np.zeros(len(names))
+    for g in groups:
+        Ig, Tg, Lg = I[g], T[g], L[g]
+        _, inv, cnt = np.unique(Tg, return_inverse=True, return_counts=True)
+        keep = cnt[inv] >= 2                             # tie points seen in at least 2 images of the group
+        if keep.sum() == 0:
+            continue
+        ag, wg = _fit_gains(Ig[keep], Tg[keep], Lg[keep], len(names))
+        used = np.unique(Ig[keep])
+        a[used] = ag[used]
+        n_obs += np.bincount(Ig[keep], wg, len(names))
+    gains = np.clip(np.exp(-a), 0.5, 2.0)
+    return {_stem(n): tuple(float(x) for x in gains[k]) for k, n in enumerate(names)}, \
         {_stem(n): int(n_obs[k]) for k, n in enumerate(names)}
 
 
@@ -864,6 +926,37 @@ def apply_gain(src, dst, gain):
     write_tiff(dst, out)
 
 
+def _split_options(options):
+    """Splits the ODM options into the ones used by the SfM and the ones used after it (DENSE_OPTIONS)."""
+    sfm, dense, k = [], [], 0
+    while k < len(options):
+        o = options[k]
+        n = DENSE_OPTIONS.get(o)
+        if n is None:
+            sfm.append(o)
+            k += 1
+        else:
+            dense += options[k:k + 1 + n]
+            k += 1 + n
+    return sfm, dense
+
+
+def _upgrade_params(old, workdir):
+    """Parameters file of versions 0.0.0.9007-9010 (one list of options): converted, epochs marked as made with them."""
+    if old.get('version') == 2:
+        return old
+    sfm, dense = _split_options(old.get('options', []))
+    ep = {'dense_options': dense, 'calibrate_col': bool(old.get('calibrate_col')),
+          'calibrate_col_by': 'chunk' if old.get('calibrate_col') else None}
+    for epoch in old.get('images', {}):
+        ortho = os.path.join(workdir, epoch, 'odm_orthophoto', 'odm_orthophoto.tif')
+        ep_file = os.path.join(workdir, epoch, EPOCH_PARAMS_FILE)
+        if os.path.isfile(ortho) and not os.path.isfile(ep_file):
+            with open(ep_file, 'w', encoding='utf-8') as f:
+                json.dump(ep, f, indent=1)
+    return {'version': 2, 'images': old.get('images'), 'sfm_options': sfm}
+
+
 # ---------------------------------------------------------------------------------------------
 # 6. Complete process
 # ---------------------------------------------------------------------------------------------
@@ -880,6 +973,7 @@ def timesift_odm_process(pathDIR,
                          suffix="",
                          folder_names=None,
                          calibrate_col=True,
+                         calibrate_col_by='chunk',
                          check_dates=True,
                          odm_path=None,
                          odm_runner="native",
@@ -898,7 +992,9 @@ def timesift_odm_process(pathDIR,
         It should be on the same disk as the images (images are then hard-linked instead of copied).
     :param float resol_ref: resolution (m) of the orthomosaics and DSMs.
     :param int downscale_factor_alignement, downscale_factor_depth_map: Metashape values, converted to ODM levels.
-    :param bool calibrate_col: colour calibration of the images on the tie points of the whole block.
+    :param bool calibrate_col: colour calibration of the images on the tie points.
+    :param str calibrate_col_by: 'chunk' (all the dates together: inside and between mosaics) or 'date' (each date
+        alone: inside each mosaic only). See compute_color_gains().
     :param bool check_dates: reports the EXIF days of the images of each folder (information only, no error).
     :param str odm_path: native: path of run.bat / run.sh ; docker: image name ; apptainer: image file.
     :param str odm_runner: 'native', 'docker' or 'apptainer'.
@@ -948,17 +1044,25 @@ def timesift_odm_process(pathDIR,
     epochs = list_epochs(pathDIR, group_by_flight=group_by_flight, folder_names=folder_names, check_dates=check_dates)
     log(f'{len(epochs)} epochs: ' + ', '.join(f'{e} ({len(i)} images)' for e, i in epochs.items()))
 
-    # a previous run in workdir is only resumed if it was made with the same images and parameters
-    params = {'images': {e: sorted(n for _, n in i) for e, i in epochs.items()},
-              'options': options, 'calibrate_col': bool(calibrate_col)}
+    if calibrate_col_by not in ('chunk', 'date'):
+        raise ValueError("calibrate_col_by must be 'chunk' or 'date'")
+
+    # A previous run in workdir is resumed if it was made with the same images and the same SfM options (otherwise:
+    # error). For each epoch, the products are kept if they were made with the same parameters; if only the colour
+    # calibration changed, only the texture and the orthomosaic are computed again; otherwise the epoch is redone.
+    sfm_options, dense_options = _split_options(options)
+    params = {'version': 2, 'images': {e: sorted(n for _, n in i) for e, i in epochs.items()},
+              'sfm_options': sfm_options}
+    epoch_params = {'dense_options': dense_options, 'calibrate_col': bool(calibrate_col),
+                    'calibrate_col_by': calibrate_col_by if calibrate_col else None}
     params_path = os.path.join(workdir, PARAMS_FILE)
     if [e for e in os.listdir(workdir) if e != TMP_NAME]:
         old = None
         if os.path.isfile(params_path):
             with open(params_path, encoding='utf-8') as f:
-                old = json.load(f)
-        if old != params:
-            raise TimeSiftError(f'{workdir} contains a previous run made with other images or parameters. '
+                old = _upgrade_params(json.load(f), workdir)
+        if old is None or old['images'] != params['images'] or old['sfm_options'] != params['sfm_options']:
+            raise TimeSiftError(f'{workdir} contains a previous run made with other images or SfM parameters. '
                                 f'Use overwrite = TRUE to delete it, or give another out_dir_project.')
     with open(params_path, 'w', encoding='utf-8') as f:
         json.dump(params, f, indent=1)
@@ -984,11 +1088,12 @@ def timesift_odm_process(pathDIR,
     # 2. colour calibration on the tie points of the whole block
     gains = None
     if calibrate_col:
-        gains, n_obs = compute_color_gains(block_dir)
+        gains, n_obs = compute_color_gains(block_dir, by=calibrate_col_by)
         save_color_gains(os.path.join(workdir, COLOR_FILE), gains, n_obs)
         g = list(gains.values())
-        log(f'Colour calibration: {len(g)} images, gains from {min(min(x) for x in g):.2f} to '
-            f'{max(max(x) for x in g):.2f} (details in {COLOR_FILE})')
+        log(f'Colour calibration ({"all dates together" if calibrate_col_by == "chunk" else "date by date"}): '
+            f'{len(g)} images, gains from {min(min(x) for x in g):.2f} to {max(max(x) for x in g):.2f} '
+            f'(details in {COLOR_FILE})')
 
     # 3. dense matching, DSM and orthomosaic for each epoch
     results = {}
@@ -996,16 +1101,30 @@ def timesift_odm_process(pathDIR,
         te = time.time()
         valid = {_stem(n) for _, n in images}
         ortho = os.path.join(workdir, epoch, 'odm_orthophoto', 'odm_orthophoto.tif')
-        if os.path.isfile(ortho):
-            log(f'Epoch {epoch}: orthomosaic already computed, skipped')
+        ep_file = os.path.join(workdir, epoch, EPOCH_PARAMS_FILE)
+        old_ep = None
+        if os.path.isfile(ortho) and os.path.isfile(ep_file):
+            with open(ep_file, encoding='utf-8') as f:
+                old_ep = json.load(f)
+        if old_ep == epoch_params:
+            log(f'Epoch {epoch}: orthomosaic already computed with the same parameters, skipped')
         else:
-            if os.path.isdir(os.path.join(workdir, epoch)):
-                shutil.rmtree(os.path.join(workdir, epoch))        # unfinished previous run
-            make_epoch_project(workdir, epoch, images, gains)
-            code = run_odm(odm_runner, odm_path, workdir, epoch, options + ['--rerun-from', 'openmvs'], tmp_dir)
+            if old_ep is not None and old_ep.get('dense_options') == epoch_params['dense_options']:
+                log(f'Epoch {epoch}: only the colour calibration changed: texture and orthomosaic computed again '
+                    f'(alignment, point cloud and mesh kept)')
+                retexture_epoch(workdir, epoch, images, gains)
+                rerun = ['--rerun-from', 'mvs_texturing']
+            else:
+                if os.path.isdir(os.path.join(workdir, epoch)):
+                    shutil.rmtree(os.path.join(workdir, epoch))    # unfinished run, or other parameters
+                make_epoch_project(workdir, epoch, images, gains)
+                rerun = ['--rerun-from', 'openmvs']
+            code = run_odm(odm_runner, odm_path, workdir, epoch, options + rerun, tmp_dir)
             if not os.path.isfile(ortho):
                 raise TimeSiftError(f'ODM failed for epoch {epoch} (exit code {code}). '
                                     f'See {os.path.join(workdir, "odm_" + epoch + ".log")}')
+            with open(ep_file, 'w', encoding='utf-8') as f:
+                json.dump(epoch_params, f, indent=1)
         check = verify_epoch_project(workdir, epoch, valid, list(epochs))
         if not check['ok'] or check['other']:
             raise TimeSiftError(f'Epoch {epoch}: images of other epochs found in the project: '
@@ -1044,6 +1163,7 @@ def main():
     p.add_argument('--downscale_factor_depth_map', type=int, default=2, choices=sorted(DEPTH_QUALITY))
     p.add_argument('--suffix', default="")
     p.add_argument('--no_calibrate_col', action='store_true')
+    p.add_argument('--calibrate_col_by', default='chunk', choices=['chunk', 'date'])
     p.add_argument('--no_check_dates', action='store_true')
     p.add_argument('--odm_path', default=None)
     p.add_argument('--odm_runner', default='native', choices=['native', 'docker', 'apptainer'])
@@ -1055,7 +1175,8 @@ def main():
                          group_by_flight=args.group_by_flight,
                          downscale_factor_alignement=args.downscale_factor_alignement,
                          downscale_factor_depth_map=args.downscale_factor_depth_map, suffix=args.suffix,
-                         calibrate_col=not args.no_calibrate_col, check_dates=not args.no_check_dates,
+                         calibrate_col=not args.no_calibrate_col, calibrate_col_by=args.calibrate_col_by,
+                         check_dates=not args.no_check_dates,
                          odm_path=args.odm_path, odm_runner=args.odm_runner, odm_args=odm_args,
                          overwrite=args.overwrite, keep_project=True if args.keep_project else None)
 

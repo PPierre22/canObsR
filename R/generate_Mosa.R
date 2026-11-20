@@ -35,7 +35,17 @@
 #' @param resol_ref numeric. The resolution (in meters) used to generate DEMs and orthomosaics. Defaults to 0.05.
 #' @param crs character. Coordinate system used for the orthomosaic, in a string format. Example: crs="EPSG::32622" (default value).
 #' @param site_name character. Adds the data site name into the names of all created folders and files, to better separate generated data from different projects. If not specified, the names will stay generic.
-#' @param calibrate_col logical. Calibrates the colours of the images (brightness and white balance) on the tie points of all dates.
+#' @param calibrate_col logical. Calibrates the colours of the images (brightness and white balance) on the tie points.
+#' @param calibrate_col_by character. Scope of the colour calibration, for both engines:
+#'   * "chunk" (default): all the images of all the dates together, through the tie points seen in several images of the
+#'     same date and of different dates: colours are harmonised inside each mosaic AND between mosaics (part of the colour
+#'     changes between dates, e.g. phenology, can be reduced);
+#'   * "date": each date alone, with the tie points seen in several images of this date: colours are harmonised inside each
+#'     mosaic, and the colour level of each date is kept (the differences of illumination between dates are kept too).
+#'
+#'   With `engine = "odm"`, if `out_dir_project` already contains the same run with another colour calibration, only the
+#'   texture and the orthomosaic are computed again (alignment, point cloud and mesh are kept): the two options can be
+#'   compared on exactly the same geometry. Give another `out_dir_ortho` to keep both series of mosaics.
 #' @param sun_sensor logical. Calibrates the reflectance using the sun sensor. Only applies to multispectral images.
 #' @param group_by_flight logical. Regroups data by flight (i.e. one orthomosaic for each subfolder of the input folder containing images). If FALSE, regroups it by date (default).
 #' @param from_mesh logiclal. Generates the orthomosaics based on the mesh model rather than the DEM. In this case, the DEM will not be created.
@@ -109,12 +119,14 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                        group_by_flight = FALSE, from_mesh = FALSE,
                        downscale_factor_alignement = 1L, downscale_factor_depth_map = 2L,
                        suffix = "", folder_names = NULL,
+                       calibrate_col_by = c("chunk", "date"),
                        engine = c("odm", "metashape"),
                        odm_path = NULL, odm_runner = c("native", "docker", "apptainer"),
                        odm_args = NULL, overwrite = FALSE, check_dates = TRUE,
                        tempdir_custom = getOption("canObsR.tempdir", NULL)) {
 
    engine <- match.arg(engine)
+   calibrate_col_by <- match.arg(calibrate_col_by)
    py <- new.env()
 
    # same subfolders for both engines: by default the ones with a date (YYYYMMDD or YYYYMM) in their name
@@ -134,6 +146,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                            crs = crs,
                            site_name = site_name,
                            calibrate_col = calibrate_col,
+                           calibrate_col_by = calibrate_col_by,
                            sun_sensor = sun_sensor,
                            group_by_flight = group_by_flight,
                            from_mesh = from_mesh,
@@ -196,6 +209,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                                   odm_args = as.list(as.character(odm_args)),
                                   overwrite = overwrite,
                                   calibrate_col = calibrate_col,
+                                  calibrate_col_by = calibrate_col_by,
                                   check_dates = check_dates,
                                   tmp_dir = tmp_sub
                                   )

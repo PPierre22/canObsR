@@ -211,6 +211,7 @@ def Time_SIFT_process(pathDIR,
                       crs="EPSG::4326", 
                       site_name = "",
                       calibrate_col = True,
+                      calibrate_col_by = "chunk",
                       sun_sensor = False,
                       group_by_flight = False,
                       from_mesh = False,
@@ -232,6 +233,9 @@ def Time_SIFT_process(pathDIR,
     :param str crs: Coordinate system used, in a string format. Example: crs="EPSG::4326" (default value).
     :param str site_name: Adds the data site name into the names of all created folders and files, to better separate generated data from different projects. If not specified, the names will stay generic.
     :param bool calibrate_col: Whether or not to apply white balance. Defaults to True.
+    :param str calibrate_col_by: "chunk" (default): colour calibration of all the images of all the dates together, on
+        the merged Time-SIFT chunk, before the split (colours harmonised inside and between mosaics); "date": colour
+        calibration of each date alone, on each chunk after the split (colours harmonised inside each mosaic only).
     :param bool sun_sensor: Whether or not to calibrate the reflectance using the sun sensor. Only applies to multispectral images. Defaults to False.
     :param bool group_by_flight: If True, regroups data by flight. Else, regroup it by date (default).
     :param bool from_mesh: Generates the orthomosaics based on the mesh model rather than the DEM. In this case, the DEM will not be created.
@@ -249,6 +253,8 @@ def Time_SIFT_process(pathDIR,
     out_dir_ortho = os.path.abspath(out_dir_ortho)
 
     calibrate_col = str2bool(calibrate_col)
+    if calibrate_col_by not in ("chunk", "date"):
+        raise ValueError('calibrate_col_by must be "chunk" or "date"')
     sun_sensor = str2bool(sun_sensor)
     group_by_flight = str2bool(group_by_flight)
 
@@ -286,15 +292,23 @@ def Time_SIFT_process(pathDIR,
     # The project needs to be saved before building DEMs and orthomosaics
     doc.save(os.path.join(out_dir_ortho, '_temp_.psx'))
 
-    # Color calibration
-    if calibrate_col and (data_type=='RGB' or data_type=='MS'):
+    # Color calibration of all the dates together (before the split)
+    if calibrate_col and calibrate_col_by == "chunk" and (data_type=='RGB' or data_type=='MS'):
         TS_chunk = [chk for chk in doc.chunks if (re.search("TimeSIFT", chk.label) is not None)][0]
+        print("Colour calibration: all the dates together")
         TS_chunk.calibrateColors(scan.TiePointsData, white_balance=True)
 
     doc.save(os.path.join(out_dir_ortho, '_temp_.psx'))
     
     split_TimeSIFT_chunk(doc, group_by_flight = group_by_flight)
     t_split = time.time()
+
+    # Color calibration of each date alone (after the split: each chunk only contains the cameras of its date)
+    if calibrate_col and calibrate_col_by == "date" and (data_type=='RGB' or data_type=='MS'):
+        for chk in [c for c in doc.chunks if re.search("TimeSIFT", c.label) is None and c.enabled]:
+            print("Colour calibration of the date", chk.label)
+            chk.calibrateColors(scan.TiePointsData, white_balance=True)
+        doc.save(os.path.join(out_dir_ortho, '_temp_.psx'))
 
     process_splited_TimeSIFT_chunks_one_by_one(doc, 
                                                out_dir_ortho = out_dir_ortho, 
@@ -336,6 +350,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_type', type=str, default = 'RGB')
     parser.add_argument('--site_name', type=str, default = "")
     parser.add_argument('--calibrate_col', default = True)
+    parser.add_argument('--calibrate_col_by', default = "chunk", choices = ["chunk", "date"])
     parser.add_argument('--sun_sensor', default = False)
     parser.add_argument('--group_by_flight', default = False)
     parser.add_argument('--from_mesh', default = False)
@@ -356,6 +371,7 @@ if __name__ == '__main__':
                         crs = args.crs,
                         site_name = args.site_name,
                         calibrate_col = args.calibrate_col,
+                        calibrate_col_by = args.calibrate_col_by,
                         sun_sensor = args.sun_sensor,
                         group_by_flight = args.group_by_flight,
                         from_mesh = args.from_mesh,
