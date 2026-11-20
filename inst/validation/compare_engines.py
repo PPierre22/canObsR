@@ -8,6 +8,7 @@
 # AROSICS tie point filtering are excluded from the statistics.
 
 import os
+import sys
 import re
 import glob
 import time
@@ -61,6 +62,18 @@ def on_ref_grid(ref, tgt, out_vrt, nodata=255):
     return out_vrt
 
 
+def _n_cpus(CPUs=None):
+    """
+    Number of processes for AROSICS. On Windows, a multiprocessing pool cannot wait on more than 63 handles (about 61
+    processes): with more (e.g. 64 threads), its internal thread fails ("need at most 63 handles") and the pool
+    hangs without an error in R. The number is therefore capped at 60 on Windows.
+    """
+    n = (os.cpu_count() or 1) if CPUs is None else int(CPUs)
+    if sys.platform.startswith('win'):
+        n = min(n, 60)
+    return max(1, n)
+
+
 def coreg_pair(ref, tgt, out_prefix, grid_res=None, window_size=256, max_shift=250, max_iter=5,
                min_reliability=60, band=1, nodata=255, CPUs=None):
     """
@@ -80,7 +93,7 @@ def coreg_pair(ref, tgt, out_prefix, grid_res=None, window_size=256, max_shift=2
     crl = COREG_LOCAL(ref, tgt, grid_res=int(grid_res), window_size=(int(window_size), int(window_size)),
                       max_shift=int(max_shift), max_iter=int(max_iter), min_reliability=float(min_reliability),
                       r_b4match=int(band), s_b4match=int(band), nodata=(nodata, nodata),
-                      CPUs=None if CPUs is None else int(CPUs), q=True, progress=False)
+                      CPUs=_n_cpus(CPUs), q=True, progress=False)
     crl.calculate_spatial_shifts()
     tbl = crl.CoRegPoints_table
     n_grid = len(tbl)
