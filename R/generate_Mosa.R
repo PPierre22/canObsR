@@ -42,7 +42,9 @@
 #' @param downscale_factor_alignement integer. Alignment accuracy (0 - Highest, 1 - High, 2 - Medium, 4 - Low, 8 - Lowest). Defaults to 1.
 #' @param downscale_factor_depth_map integer. Depth map quality (1 - Ultra high, 2 - High, 4 - Medium, 8 - Low, 16 - Lowest). Defaults to 2.
 #' @param suffix character. Text to add at the end of the output filenames.
-#' @param folder_names character. Names of the subfolders of `path_in` to process. All subfolders by default.
+#' @param folder_names character. Names of the subfolders of `path_in` to process. By default, all the subfolders with a
+#'   date (YYYYMMDD or YYYYMM) in their name (all the subfolders with `group_by_flight = TRUE`); the others are ignored
+#'   and listed in a message. Folders whose name starts with "." or "_", and `time-sift-block`, are always ignored.
 #' @param engine character. Photogrammetry software used: "odm" (OpenDroneMap, default) or "metashape".
 #' @param odm_path character. Only for `engine = "odm"`. With `odm_runner = "native"`, path to the ODM launcher (`run.bat` on Windows, `run.sh` on Linux). By default, the option `canObsR.odm_path`, then the environment variable `ODM_PATH`, then `C:/ODM/run.bat`. With "docker", name of the image (default "opendronemap/odm"). With "apptainer", path to the image file.
 #' @param odm_runner character. How ODM is launched: "native" (default), "docker" or "apptainer" (clusters).
@@ -114,6 +116,10 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
 
    engine <- match.arg(engine)
    py <- new.env()
+
+   # same subfolders for both engines: by default the ones with a date (YYYYMMDD or YYYYMM) in their name
+   if (is.null(folder_names)) folder_names <- .select_subfolders(path_in, group_by_flight)
+   folder_names <- as.list(folder_names)     # a python list even for a single folder
 
    if (engine == "metashape") {
 
@@ -289,4 +295,16 @@ check_odm_epochs <- function(out_dir_project, verbose = TRUE) {
               files_checked = vapply(res, function(x) length(x$checked), 0L),
               critical = vapply(res, function(x) paste(names(x$critical), collapse = "; "), ""),
               other = vapply(res, function(x) paste(names(x$other), collapse = "; "), ""))
+}
+
+
+# Subfolders of path_in processed by generate_Mosa() (same rule for both engines)
+.select_subfolders <- function(path_in, group_by_flight = FALSE) {
+   subs <- list.dirs(path_in, full.names = FALSE, recursive = FALSE)
+   keep <- subs[!subs %in% c("time-sift-block", "timesift_block") & !grepl("^[._]", subs)]
+   if (!group_by_flight) keep <- keep[grepl("\\d{4}(0[1-9]|1[0-2])([0-2][0-9]|3[01])?", keep)]
+   ignored <- setdiff(subs, keep)
+   if (length(ignored)) message("Subfolders ignored (no date in their name, or reserved name): ", paste(ignored, collapse = ", "))
+   if (length(keep) == 0) stop("No subfolder to process in ", path_in)
+   keep
 }

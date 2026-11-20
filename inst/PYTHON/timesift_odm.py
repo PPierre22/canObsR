@@ -419,7 +419,7 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
     with open(os.path.join(datasets_dir, f'odm_{project}.log'), 'a', encoding='utf-8', errors='replace') as logfile, \
             open(timings, 'a', encoding='utf-8') as tfile:
         if new_file:
-            tfile.write('project,stage,seconds\n')
+            tfile.write('project,stage,seconds,start,end\n')
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                 env=env, text=True, encoding='utf-8', errors='replace')
         for line in proc.stdout:
@@ -430,7 +430,10 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
                 if m.group(1) == 'Running':
                     started[m.group(2)] = time.time()
                 elif m.group(2) in started:
-                    tfile.write(f'{project},{m.group(2)},{time.time() - started.pop(m.group(2)):.0f}\n')
+                    t_start, t_end = started.pop(m.group(2)), time.time()
+                    fmt = '%Y-%m-%d %H:%M:%S'
+                    tfile.write(f'{project},{m.group(2)},{t_end - t_start:.0f},'
+                                f'{time.strftime(fmt, time.localtime(t_start))},{time.strftime(fmt, time.localtime(t_end))}\n')
                     tfile.flush()
             elif GPU_RE.search(line) and len(gpu_lines) < 5 and line.strip() not in gpu_lines:
                 gpu_lines.append(line.strip())
@@ -449,7 +452,7 @@ def timings_summary(workdir):
     with open(path, encoding='utf-8') as f:
         next(f)
         for line in f:
-            project, stage, sec = line.strip().split(',')
+            project, stage, sec = line.strip().split(',')[:3]
             target = block if project == BLOCK_NAME else epochs
             target[stage] = target.get(stage, 0) + float(sec)
     log('Time spent per ODM stage (minutes):')
@@ -940,6 +943,8 @@ def timesift_odm_process(pathDIR,
         options += ['--dsm', '--dem-resolution', str(float(resol_ref) * 100)]
     options += [str(a) for a in (odm_args or [])]
 
+    if site_name:                                      # same file names as the Metashape pipeline: <site>_<date><suffix>
+        site_name = site_name + '_'
     epochs = list_epochs(pathDIR, group_by_flight=group_by_flight, folder_names=folder_names, check_dates=check_dates)
     log(f'{len(epochs)} epochs: ' + ', '.join(f'{e} ({len(i)} images)' for e, i in epochs.items()))
 
