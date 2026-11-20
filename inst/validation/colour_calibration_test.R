@@ -18,7 +18,7 @@ use_condaenv("C:/ProgramData/miniconda3/envs/arosics", required = TRUE)
 
 my_path   <- "D:/canObsR/data/canObsR_data/canObsR_data"
 path_in   <- file.path(my_path, "1_my_drone_data")
-bench_dir <- file.path(my_path, "benchmark2")
+bench_dir <- file.path(my_path, "benchmark3")
 odm_path  <- "C:/ODM/run.bat"
 run_odm_date       <- TRUE
 run_metashape_date <- TRUE

@@ -19,7 +19,19 @@ generate_Mosa(
   from_mesh = FALSE,
   downscale_factor_alignement = 1L,
   downscale_factor_depth_map = 2L,
-  suffix = ""
+  suffix = "",
+  folder_names = NULL,
+  calibrate_col_by = c("chunk", "date"),
+  engine = c("odm", "metashape"),
+  odm_path = NULL,
+  odm_runner = c("native", "docker", "apptainer"),
+  odm_args = NULL,
+  overwrite = FALSE,
+  check_dates = TRUE,
+  tempdir_custom = getOption("canObsR.tempdir", NULL),
+  keypoint_limit = 100000L,
+  tiepoint_limit = 10000L,
+  calibrate_vignetting = TRUE
 )
 }
 \arguments{
@@ -39,43 +51,141 @@ generate_Mosa(
 
 \item{site_name}{character. Adds the data site name into the names of all created folders and files, to better separate generated data from different projects. If not specified, the names will stay generic.}
 
-\item{calibrate_col}{logical. Applies white balance.}
+\item{calibrate_col}{logical. Calibrates the colours of the images (brightness and white balance, i.e. each colour
+channel separately, and vignetting) on the tie points.}
 
 \item{sun_sensor}{logical. Calibrates the reflectance using the sun sensor. Only applies to multispectral images.}
 
 \item{group_by_flight}{logical. Regroups data by flight (i.e. one orthomosaic for each subfolder of the input folder containing images). If FALSE, regroups it by date (default).}
 
-\item{from_mesh}{logiclal. Generates the orthomosaics based on the mesh model rather than the DEM. In this case, the DEM will not be created.}
+\item{from_mesh}{logical. Generates the orthomosaics based on the mesh model rather than the DEM. In this case, the DEM will not be created.
+With \code{engine = "odm"}, the full 3D mesh is used instead of the 2.5D mesh (ODM \verb{--use-3dmesh}).}
 
 \item{downscale_factor_alignement}{integer. Alignment accuracy (0 - Highest, 1 - High, 2 - Medium, 4 - Low, 8 - Lowest). Defaults to 1.}
 
 \item{downscale_factor_depth_map}{integer. Depth map quality (1 - Ultra high, 2 - High, 4 - Medium, 8 - Low, 16 - Lowest). Defaults to 2.}
 
 \item{suffix}{character. Text to add at the end of the output filenames.}
+
+\item{folder_names}{character. Names of the subfolders of \code{path_in} to process. By default, all the subfolders with a
+date (YYYYMMDD or YYYYMM) in their name (all the subfolders with \code{group_by_flight = TRUE}); the others are ignored
+and listed in a message. Folders whose name starts with "." or "_", and \code{time-sift-block}, are always ignored.}
+
+\item{calibrate_col_by}{character. Scope of the colour calibration, for both engines. Both use the same tie points,
+from the alignment of all the dates together; only the images that are made consistent differ:
+\itemize{
+\item "chunk" (default): all the images of all the dates together: a tie point must have the same colour in all the
+images, of all the dates. Colours are harmonised inside each mosaic AND between mosaics (part of the colour
+changes between dates, e.g. phenology, can be reduced);
+\item "date": the images of each date together: a tie point must have the same colour in the images of a date, and may
+change from one date to another. Colours are harmonised inside each mosaic, and the colour level of each date is
+kept (the differences of illumination between dates are kept too).
+}
+
+With \code{engine = "odm"}, if \code{out_dir_project} already contains the same run with another colour calibration, only the
+texture and the orthomosaic are computed again (alignment, point cloud and mesh are kept): the two options can be
+compared on exactly the same geometry. Give another \code{out_dir_ortho} to keep both series of mosaics.}
+
+\item{engine}{character. Photogrammetry software used: "odm" (OpenDroneMap, default) or "metashape".}
+
+\item{odm_path}{character. Only for \code{engine = "odm"}. With \code{odm_runner = "native"}, path to the ODM launcher (\code{run.bat} on Windows, \code{run.sh} on Linux). By default, the option \code{canObsR.odm_path}, then the environment variable \code{ODM_PATH}, then \verb{C:/ODM/run.bat}. With "docker", name of the image (default "opendronemap/odm"). With "apptainer", path to the image file.}
+
+\item{odm_runner}{character. How ODM is launched: "native" (default), "docker" or "apptainer" (clusters).}
+
+\item{odm_args}{character vector. Additional options passed to ODM, e.g. \code{c("--matcher-neighbors", "16")}.}
+
+\item{overwrite}{logical. Only for \code{engine = "odm"}. Deletes the existing ODM projects before running, instead of resuming.}
+
+\item{check_dates}{logical. Only for \code{engine = "odm"}. Reports the folders whose images were taken on several days or
+on another day than the folder date (information only, never an error).}
+
+\item{tempdir_custom}{character. Only for \code{engine = "odm"}. Directory for the temporary files (R terra, GDAL and ODM).
+Default: the option \code{canObsR.tempdir} if set (\code{options(canObsR.tempdir = "D:/tmp")}), otherwise a \verb{_tmp} folder in
+\code{out_dir_project} (or in \code{out_dir_ortho}). Large temporary files are written during the post-processing of the
+orthomosaics: this folder should be on a disk with free space (not the system disk). A subfolder is created in it
+and deleted at the end.}
+
+\item{keypoint_limit}{integer. Maximum number of keypoints detected per image for the alignment (Metashape
+\code{keypoint_limit}; ODM \code{--min-num-features}, the number of features extracted per image). Default 100000, the value
+of the Metashape pipeline. A smaller value makes the ODM alignment much faster (ODM default: 10000), with fewer tie
+points between dates. With Metashape, the photos that are not aligned are matched again with twice this limit.}
+
+\item{tiepoint_limit}{integer. Only for \code{engine = "metashape"}: maximum number of tie points kept per image (Metashape
+\code{tiepoint_limit}, default 10000; doubled for the photos matched again). ODM has no equivalent.}
+
+\item{calibrate_vignetting}{logical. Only for \code{engine = "odm"}, with \code{calibrate_col}: also corrects the vignetting of
+the camera, estimated on the same tie points (Metashape \code{calibrateColors()} estimates it too).}
 }
 \value{
-None
+None (metashape) or, invisibly, the paths of the orthomosaics (odm).
 }
 \description{
-Implementation in R of a pipeline that performs the Time-SIFT process to time series of drone images using the Metashape python API. All photos are loaded and aligned, then orthomosaics and (optionally) DEMs will be generated for each date or flight.
+Implementation in R of a pipeline that performs the Time-SIFT process to time series of drone images. All photos are loaded and aligned in a single block, then orthomosaics and (optionally) DEMs will be generated for each date or flight.
+Two engines are available: OpenDroneMap (\code{engine = "odm"}, free and open source, default) and the Metashape python API (\code{engine = "metashape"}, requires a license).
+}
+\details{
+The two engines are set to do the same processing as far as possible (same images and dates, same number of
+keypoints, same accuracy of the GPS positions, depth maps at the same image resolution, colour calibration on the
+same tie points, products rendered at \code{resol_ref} in \code{crs}); the remaining differences come from the algorithms of
+each software (e.g. ODM detects the keypoints on images of 4480 px at most, and projects the images on a simplified
+2.5D mesh instead of a DEM). They are described in \code{system.file("ENGINES.md", package = "canObsR")} (in French).
+
+With \code{engine = "odm"}:
+\itemize{
+\item only RGB images are handled for now (\code{data_type} and \code{sun_sensor} are not used);
+\item without \code{group_by_flight}, the subfolders of \code{path_in} without a date in their name are ignored;
+\item the folder defines the date: all the images of a folder make one mosaic, even if some were taken on another day
+(e.g. a flight finished the next day). The EXIF days are only reported (\code{check_dates}); use \code{\link[=check_flights]{check_flights()}} to
+check the folders before processing;
+\item an error is raised if the same image file is found twice (e.g. a copy of the images inside \code{path_in});
+\item \code{downscale_factor_alignement} and \code{downscale_factor_depth_map} are converted to the ODM levels that use the same
+image resolution as Metashape (ODM \code{--feature-quality} and \code{--pc-quality});
+\item \code{calibrate_col = TRUE} computes one gain per image and per colour channel, and one vignetting correction per
+camera and per channel (\code{calibrate_vignetting}), so that the tie points have the same colour in all the images
+where they are seen (as Metashape \code{calibrateColors(white_balance = TRUE)}), and applies them to the images used
+to build the orthomosaics (see \code{color_gains.csv} and \code{vignetting.csv} in \code{out_dir_project});
+\item after each date, the ODM project is checked: an error is raised if an image of another date is found in it
+(see also \code{\link[=check_odm_epochs]{check_odm_epochs()}});
+\item the orthomosaics are written in the same format as with Metashape: 3 bands (RGB), white (255) background,
+resolution \code{resol_ref}, coordinate system \code{crs}. ODM renders them in the UTM zone of the site: when \code{crs} is this
+UTM zone, the pixels are kept as rendered (no resampling); otherwise they are reprojected (bilinear) on a grid
+aligned on multiples of \code{resol_ref}.
+The ODM projects are written in \code{out_dir_project} (default: a \verb{_odm_timesift_} folder inside \code{out_dir_ortho}, deleted at the end);
+this folder should be on the same disk as the images, which are then hard-linked instead of copied.
+If a run is interrupted, running the same call again resumes it (set \code{overwrite = TRUE} to start from scratch).
+}
+
+The Time-SIFT method is described in Feurer & Vinatier (2018) \doi{10.1016/j.isprsjprs.2018.10.016}.
 }
 \examples{
 
 \dontrun{
 library(reticulate)
 
+# With OpenDroneMap (default)
+generate_Mosa(path_in = "path_to_my_drone_data",
+               out_dir_ortho = "my_output_folder/ORTHO",
+               resol_ref = 0.05,
+               site_name = "Bouamir",
+               crs = "EPSG::32633",
+               odm_path = "C:/ODM/run.bat"
+               )
+
+# With Metashape
 generate_Mosa(path_in = "path_to_my_drone_data",
                out_dir_ortho = "my_output_folder/ORTHO",
                #out_dir_DEM = "my_output_folder/DEM",
                data_type = "RGB",
                resol_ref = 0.05,
                site_name = "Bouamir",
-               crs = "EPSG::32633"
+               crs = "EPSG::32633",
+               engine = "metashape"
                )
 
 generate_Mosa(path_in = "path_to_my_drone_data",
                out_dir_ortho = "my_output_folder/ORTHO",
                #out_dir_DEM = "my_output_folder/DEM",
+               engine = "metashape",
                data_type = "MS",
                sun_sensor = TRUE,
                crs = "EPSG::32622",

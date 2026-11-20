@@ -5,8 +5,14 @@
 #' Two engines are available: OpenDroneMap (`engine = "odm"`, free and open source, default) and the Metashape python API (`engine = "metashape"`, requires a license).
 #'
 #' @details
+#' The two engines are set to do the same processing as far as possible (same images and dates, same number of
+#' keypoints, same accuracy of the GPS positions, depth maps at the same image resolution, colour calibration on the
+#' same tie points, products rendered at `resol_ref` in `crs`); the remaining differences come from the algorithms of
+#' each software (e.g. ODM detects the keypoints on images of 4480 px at most, and projects the images on a simplified
+#' 2.5D mesh instead of a DEM). They are described in `system.file("ENGINES.md", package = "canObsR")` (in French).
+#'
 #' With `engine = "odm"`:
-#' * only RGB images are handled for now (`data_type`, `sun_sensor` and `from_mesh` are not used);
+#' * only RGB images are handled for now (`data_type` and `sun_sensor` are not used);
 #' * without `group_by_flight`, the subfolders of `path_in` without a date in their name are ignored;
 #' * the folder defines the date: all the images of a folder make one mosaic, even if some were taken on another day
 #'   (e.g. a flight finished the next day). The EXIF days are only reported (`check_dates`); use [check_flights()] to
@@ -14,13 +20,16 @@
 #' * an error is raised if the same image file is found twice (e.g. a copy of the images inside `path_in`);
 #' * `downscale_factor_alignement` and `downscale_factor_depth_map` are converted to the ODM levels that use the same
 #'   image resolution as Metashape (ODM `--feature-quality` and `--pc-quality`);
-#' * `calibrate_col = TRUE` computes one gain per image and per colour channel so that the tie points of the whole
-#'   multi-temporal block (all dates together, as in the Metashape pipeline) have the same colour in all images, and
-#'   applies it to the images used to build the orthomosaics (see `color_gains.csv` in `out_dir_project`);
+#' * `calibrate_col = TRUE` computes one gain per image and per colour channel, and one vignetting correction per
+#'   camera and per channel (`calibrate_vignetting`), so that the tie points have the same colour in all the images
+#'   where they are seen (as Metashape `calibrateColors(white_balance = TRUE)`), and applies them to the images used
+#'   to build the orthomosaics (see `color_gains.csv` and `vignetting.csv` in `out_dir_project`);
 #' * after each date, the ODM project is checked: an error is raised if an image of another date is found in it
 #'   (see also [check_odm_epochs()]);
 #' * the orthomosaics are written in the same format as with Metashape: 3 bands (RGB), white (255) background,
-#'   resolution `resol_ref` on a grid aligned on multiples of `resol_ref`, coordinate system `crs`.
+#'   resolution `resol_ref`, coordinate system `crs`. ODM renders them in the UTM zone of the site: when `crs` is this
+#'   UTM zone, the pixels are kept as rendered (no resampling); otherwise they are reprojected (bilinear) on a grid
+#'   aligned on multiples of `resol_ref`.
 #' The ODM projects are written in `out_dir_project` (default: a `_odm_timesift_` folder inside `out_dir_ortho`, deleted at the end);
 #' this folder should be on the same disk as the images, which are then hard-linked instead of copied.
 #' If a run is interrupted, running the same call again resumes it (set `overwrite = TRUE` to start from scratch).
@@ -35,20 +44,24 @@
 #' @param resol_ref numeric. The resolution (in meters) used to generate DEMs and orthomosaics. Defaults to 0.05.
 #' @param crs character. Coordinate system used for the orthomosaic, in a string format. Example: crs="EPSG::32622" (default value).
 #' @param site_name character. Adds the data site name into the names of all created folders and files, to better separate generated data from different projects. If not specified, the names will stay generic.
-#' @param calibrate_col logical. Calibrates the colours of the images (brightness and white balance) on the tie points.
-#' @param calibrate_col_by character. Scope of the colour calibration, for both engines:
-#'   * "chunk" (default): all the images of all the dates together, through the tie points seen in several images of the
-#'     same date and of different dates: colours are harmonised inside each mosaic AND between mosaics (part of the colour
+#' @param calibrate_col logical. Calibrates the colours of the images (brightness and white balance, i.e. each colour
+#'   channel separately, and vignetting) on the tie points.
+#' @param calibrate_col_by character. Scope of the colour calibration, for both engines. Both use the same tie points,
+#'   from the alignment of all the dates together; only the images that are made consistent differ:
+#'   * "chunk" (default): all the images of all the dates together: a tie point must have the same colour in all the
+#'     images, of all the dates. Colours are harmonised inside each mosaic AND between mosaics (part of the colour
 #'     changes between dates, e.g. phenology, can be reduced);
-#'   * "date": each date alone, with the tie points seen in several images of this date: colours are harmonised inside each
-#'     mosaic, and the colour level of each date is kept (the differences of illumination between dates are kept too).
+#'   * "date": the images of each date together: a tie point must have the same colour in the images of a date, and may
+#'     change from one date to another. Colours are harmonised inside each mosaic, and the colour level of each date is
+#'     kept (the differences of illumination between dates are kept too).
 #'
 #'   With `engine = "odm"`, if `out_dir_project` already contains the same run with another colour calibration, only the
 #'   texture and the orthomosaic are computed again (alignment, point cloud and mesh are kept): the two options can be
 #'   compared on exactly the same geometry. Give another `out_dir_ortho` to keep both series of mosaics.
 #' @param sun_sensor logical. Calibrates the reflectance using the sun sensor. Only applies to multispectral images.
 #' @param group_by_flight logical. Regroups data by flight (i.e. one orthomosaic for each subfolder of the input folder containing images). If FALSE, regroups it by date (default).
-#' @param from_mesh logiclal. Generates the orthomosaics based on the mesh model rather than the DEM. In this case, the DEM will not be created.
+#' @param from_mesh logical. Generates the orthomosaics based on the mesh model rather than the DEM. In this case, the DEM will not be created.
+#'   With `engine = "odm"`, the full 3D mesh is used instead of the 2.5D mesh (ODM `--use-3dmesh`).
 #' @param downscale_factor_alignement integer. Alignment accuracy (0 - Highest, 1 - High, 2 - Medium, 4 - Low, 8 - Lowest). Defaults to 1.
 #' @param downscale_factor_depth_map integer. Depth map quality (1 - Ultra high, 2 - High, 4 - Medium, 8 - Low, 16 - Lowest). Defaults to 2.
 #' @param suffix character. Text to add at the end of the output filenames.
@@ -67,6 +80,14 @@
 #'   `out_dir_project` (or in `out_dir_ortho`). Large temporary files are written during the post-processing of the
 #'   orthomosaics: this folder should be on a disk with free space (not the system disk). A subfolder is created in it
 #'   and deleted at the end.
+#' @param keypoint_limit integer. Maximum number of keypoints detected per image for the alignment (Metashape
+#'   `keypoint_limit`; ODM `--min-num-features`, the number of features extracted per image). Default 100000, the value
+#'   of the Metashape pipeline. A smaller value makes the ODM alignment much faster (ODM default: 10000), with fewer tie
+#'   points between dates. With Metashape, the photos that are not aligned are matched again with twice this limit.
+#' @param tiepoint_limit integer. Only for `engine = "metashape"`: maximum number of tie points kept per image (Metashape
+#'   `tiepoint_limit`, default 10000; doubled for the photos matched again). ODM has no equivalent.
+#' @param calibrate_vignetting logical. Only for `engine = "odm"`, with `calibrate_col`: also corrects the vignetting of
+#'   the camera, estimated on the same tie points (Metashape `calibrateColors()` estimates it too).
 #'
 #' @export
 #' @importFrom reticulate source_python
@@ -123,7 +144,9 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                        engine = c("odm", "metashape"),
                        odm_path = NULL, odm_runner = c("native", "docker", "apptainer"),
                        odm_args = NULL, overwrite = FALSE, check_dates = TRUE,
-                       tempdir_custom = getOption("canObsR.tempdir", NULL)) {
+                       tempdir_custom = getOption("canObsR.tempdir", NULL),
+                       keypoint_limit = 100000L, tiepoint_limit = 10000L,
+                       calibrate_vignetting = TRUE) {
 
    engine <- match.arg(engine)
    calibrate_col_by <- match.arg(calibrate_col_by)
@@ -153,7 +176,9 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                            downscale_factor_alignement = downscale_factor_alignement,
                            downscale_factor_depth_map = downscale_factor_depth_map,
                            suffix = suffix,
-                           folder_names = folder_names
+                           folder_names = folder_names,
+                           keypoint_limit = as.integer(keypoint_limit),
+                           tiepoint_limit = as.integer(tiepoint_limit)
                            )
       return(invisible(NULL))
    }
@@ -210,6 +235,9 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                                   overwrite = overwrite,
                                   calibrate_col = calibrate_col,
                                   calibrate_col_by = calibrate_col_by,
+                                  calibrate_vignetting = calibrate_vignetting,
+                                  keypoint_limit = as.integer(keypoint_limit),
+                                  from_mesh = from_mesh,
                                   check_dates = check_dates,
                                   tmp_dir = tmp_sub
                                   )
@@ -217,7 +245,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    # same format as the Metashape outputs: RGB, white background, resol_ref grid, crs
    target <- gsub("::", ":", crs, fixed = TRUE)
    for (f in unlist(res)) .format_odm_raster(f, target, resol_ref, type = "ortho")
-   if (!is.null(out_dir_DEM)) {
+   if (!is.null(out_dir_DEM) && !from_mesh) {
       if (out_dir_DEM == "") out_dir_DEM <- file.path(dirname(out_dir_ortho), "DEM")
       dem <- file.path(out_dir_DEM, basename(unlist(res)))
       for (f in dem[file.exists(dem)]) .format_odm_raster(f, target, resol_ref, type = "dem")
@@ -230,50 +258,79 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
 # Converts an ODM raster to the format of the Metashape outputs of canObsR
 #  - ortho: 3 bands (alpha removed), 255 where there is no data (Metashape white background), INT1U
 #  - dem: 1 band, NA where there is no data
-#  - both: crs, resolution res, grid aligned on multiples of res
+#  - both: crs, resolution res.
+# ODM renders the products in the UTM zone of the site (WGS84). When it is the target crs and the resolution is
+# already res (ODM option --ignore-gsd), the pixels are kept as they are (no resampling, like Metashape, which
+# renders the orthomosaic directly in the target crs): only the format changes, and the grid is the one of ODM.
+# Otherwise (other crs), the raster is reprojected (bilinear) on a grid aligned on multiples of res.
 .format_odm_raster <- function(f, crs, res, type = c("ortho", "dem")) {
    type <- match.arg(type)
    r <- terra::rast(f)
-   # template: target crs, grid aligned on multiples of res
-   e <- terra::ext(terra::project(terra::as.polygons(terra::ext(r), crs = terra::crs(r)), crs))
-   e <- terra::ext(floor(e$xmin / res) * res, ceiling(e$xmax / res) * res,
-                   floor(e$ymin / res) * res, ceiling(e$ymax / res) * res)
-   tmpl <- terra::rast(e, resolution = res, crs = crs)
    gdal <- c("COMPRESS=LZW", "BIGTIFF=IF_SAFER", "TILED=YES")
    out <- paste0(tools::file_path_sans_ext(f), "_canobs_tmp.tif")
+   resample <- !.same_crs(terra::crs(r), crs) || any(abs(terra::res(r) - res) > 1e-6 * res)
+   if (resample) {
+      message("Reprojection of ", basename(f), " (ODM: ", .crs_label(terra::crs(r)), ", ",
+              paste(signif(terra::res(r), 4), collapse = " x "), " m) to ", crs, ", ", res, " m (bilinear)")
+      # template: target crs, grid aligned on multiples of res
+      e <- terra::ext(terra::project(terra::as.polygons(terra::ext(r), crs = terra::crs(r)), crs))
+      e <- terra::ext(floor(e$xmin / res) * res, ceiling(e$xmax / res) * res,
+                      floor(e$ymin / res) * res, ceiling(e$ymax / res) * res)
+      tmpl <- terra::rast(e, resolution = res, crs = crs)
+   }
    if (type == "ortho") {
-      # 1. reprojection / resampling of the 4 bands (RGB + alpha), written compressed next to the output
-      proj <- paste0(tools::file_path_sans_ext(f), "_canobs_proj.tif")
       if (terra::nlyr(r) >= 4) {
          # the alpha band defines the no-data area: a no-data value declared in the file (e.g. 255) is ignored,
          # through a small virtual file (VRT) written in the temporary folder
          vrt <- tempfile(fileext = ".vrt", tmpdir = terra::terraOptions(print = FALSE)$tempdir)
          sf::gdal_utils("translate", f, vrt, options = c("-of", "VRT", "-a_nodata", "none"))
-         r <- terra::rast(vrt)
+         r <- terra::rast(vrt)[[1:4]]
       } else {
          r <- c(r[[1:3]], terra::init(r[[1]], 255))
       }
-      # (INT2U: 0-255 values and a separate no-data value, 65535)
-      terra::project(r[[1:4]], tmpl, method = "bilinear", filename = proj, overwrite = TRUE,
-                     wopt = list(datatype = "INT2U", gdal = gdal))
-      # 2. alpha removed, white (255) where there is no data, as in the Metashape outputs
+      proj <- NULL
+      if (resample) {
+         # reprojection of the 4 bands (RGB + alpha), written compressed next to the output
+         # (INT2U: 0-255 values and a separate no-data value, 65535)
+         proj <- paste0(tools::file_path_sans_ext(f), "_canobs_proj.tif")
+         terra::project(r, tmpl, method = "bilinear", filename = proj, overwrite = TRUE,
+                        wopt = list(datatype = "INT2U", gdal = gdal))
+         r <- terra::rast(proj)
+      }
+      # alpha removed, white (255) where there is no data, as in the Metashape outputs
       white_bg <- function(r, g, b, a) {
          rgb <- round(cbind(r, g, b))
          rgb[is.na(a) | a < 128 | is.na(rgb[, 1]), ] <- 255
          rgb
       }
-      terra::lapp(terra::rast(proj), white_bg, filename = out, overwrite = TRUE,
+      terra::lapp(r, white_bg, filename = out, overwrite = TRUE,
                   wopt = list(datatype = "INT1U", gdal = gdal, NAflag = NA, names = c("red", "green", "blue")))
-      unlink(proj)
+      rm(r)
+      if (!is.null(proj)) unlink(proj)
    } else {
-      terra::project(r, tmpl, method = "bilinear", filename = out, overwrite = TRUE,
-                     wopt = list(datatype = "FLT4S", gdal = gdal))
+      if (resample) {
+         terra::project(r, tmpl, method = "bilinear", filename = out, overwrite = TRUE,
+                        wopt = list(datatype = "FLT4S", gdal = gdal))
+      } else {
+         terra::writeRaster(r, out, overwrite = TRUE, datatype = "FLT4S", gdal = gdal)
+      }
+      rm(r)
    }
-   rm(r)
    gc()
    file.remove(f)
    file.rename(out, f)
    invisible(f)
+}
+
+# TRUE if the two coordinate reference systems are the same (e.g. ODM "+proj=utm +zone=33 +datum=WGS84" and "EPSG:32633")
+.same_crs <- function(a, b) {
+   isTRUE(tryCatch(sf::st_crs(a) == sf::st_crs(b), error = function(e) FALSE))
+}
+
+.crs_label <- function(x) {
+   cr <- tryCatch(sf::st_crs(x), error = function(e) NULL)
+   if (is.null(cr) || is.na(cr$input)) return("unknown crs")
+   if (!is.null(cr$epsg) && !is.na(cr$epsg)) paste0("EPSG:", cr$epsg) else cr$input
 }
 
 

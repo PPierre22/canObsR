@@ -7,17 +7,19 @@
 # - GPU usage is logged every 5 s with nvidia-smi during each run (gpu_usage_<engine>.csv);
 # - the console output is also written to console_<engine>.txt (times of each step for Metashape);
 # - everything is written in bench_dir; temporary files and ODM projects stay on D:.
+# - canObsR >= 0.0.0.9012: the two engines are set to do the same processing (see ENGINES.md in the package):
+#   use a new bench_dir (the ODM project of an older version cannot be resumed).
 # =====================================================================================================
 
 lib_dev <- "D:/canObsR/Rlib_dev"
-# install.packages("D:/canObsR/canObsR_0.0.0.9011_odm.tar.gz", repos = NULL, type = "source", lib = lib_dev)  # once, R restarted
+# install.packages("D:/canObsR/canObsR_0.0.0.9012_odm.tar.gz", repos = NULL, type = "source", lib = lib_dev)  # once, R restarted
 library(canObsR, lib.loc = lib_dev)
 library(reticulate)
 use_condaenv("C:/ProgramData/miniconda3/envs/arosics", required = TRUE)   # with Metashape API and arosics
 
 my_path   <- "D:/canObsR/data/canObsR_data/canObsR_data"
 path_in   <- file.path(my_path, "1_my_drone_data")
-bench_dir <- file.path(my_path, "benchmark2")                # everything produced by the benchmark goes here
+bench_dir <- file.path(my_path, "benchmark3")                # everything produced by the benchmark goes here
 odm_path  <- "C:/ODM/run.bat"
 run_metashape <- TRUE
 run_odm       <- TRUE
@@ -132,6 +134,29 @@ if (!is.null(gpu_summary)) {
    print(gpu_summary, row.names = FALSE)
 }
 print(timings, row.names = FALSE)
+
+# ---- 3b. colour calibration: what each engine estimated ----------------------------------------
+# Metashape: lines printed after calibrateColors() (vignetting of the sensor, if Metashape estimates it)
+if (file.exists(f_con)) {
+   l <- grep("^Colour calibration|^    (attributes|band)", readLines(f_con, warn = FALSE), value = TRUE)
+   writeLines(l, file.path(dir_out, "colour_calibration_metashape.txt"))
+   cat(head(l, 20), sep = "\n")
+}
+# ODM: gains per image and vignetting per camera
+for (f in c("color_gains.csv", "vignetting.csv")) {
+   src <- file.path(bench_dir, "project_odm", f)
+   if (file.exists(src)) file.copy(src, file.path(dir_out, paste0("odm_", f)), overwrite = TRUE)
+}
+# grid of the orthomosaics (origin and resolution): ODM keeps its own grid when no reprojection is needed
+grid <- do.call(rbind, lapply(c(dir_ref, dir_odm), function(d) {
+   do.call(rbind, lapply(list.files(d, pattern = "\\.tif$", full.names = TRUE), function(f) {
+      r <- terra::rast(f)
+      data.frame(file = basename(f), engine = basename(d), xmin = terra::xmin(r), ymax = terra::ymax(r),
+                 res_x = terra::res(r)[1], res_y = terra::res(r)[2], ncol = terra::ncol(r), nrow = terra::nrow(r),
+                 crs = terra::crs(r, describe = TRUE)$code)
+   }))
+}))
+if (!is.null(grid)) { write.csv(grid, file.path(dir_out, "grids_engines.csv"), row.names = FALSE); print(grid, row.names = FALSE) }
 
 # ---- 4. comparison of the mosaics (uses dir_ref, dir_odm, dir_out defined above) ----------------
 py_file <- "D:/canObsR/compare_engines.py"

@@ -87,23 +87,24 @@ def merge_chunk_TimeSIFT(doc):
     print("Time spent merging photos : ", time.time() - start_time)
 
 
-def align_TimeSIFT_chunk(doc, downscale_factor = 1):
+def align_TimeSIFT_chunk(doc, downscale_factor = 1, keypoint_limit = 100000, tiepoint_limit = 10000):
     """
-    Aligns all cameras in the merged chunk
+    Aligns all cameras in the merged chunk. The photos that are not aligned are matched again with twice the limits.
     """
     start_time = time.time()
+    keypoint_limit, tiepoint_limit = int(keypoint_limit), int(tiepoint_limit)
     TS_chunk=[chk for chk in doc.chunks if re.search("TimeSIFT",chk.label) is not None][0]
     TS_chunk.matchPhotos(downscale=downscale_factor, generic_preselection=True, reference_preselection=True,
-                         reference_preselection_mode=scan.ReferencePreselectionSource, keypoint_limit=100000,
-                         tiepoint_limit=10000,keep_keypoints=False)
+                         reference_preselection_mode=scan.ReferencePreselectionSource, keypoint_limit=keypoint_limit,
+                         tiepoint_limit=tiepoint_limit,keep_keypoints=False)
     # loop to re-align non-aligned photos
     nb_aligned_before = 0
     nb_aligned_after = 100
     while nb_aligned_after != nb_aligned_before:
         nb_aligned_before = len([i for i in TS_chunk.cameras if i.transform])
         TS_chunk.matchPhotos(downscale=downscale_factor, generic_preselection=True, reference_preselection=True,
-                             reference_preselection_mode=scan.ReferencePreselectionSource, keypoint_limit=200000,
-                             tiepoint_limit=20000,keep_keypoints=False)
+                             reference_preselection_mode=scan.ReferencePreselectionSource, keypoint_limit=2*keypoint_limit,
+                             tiepoint_limit=2*tiepoint_limit,keep_keypoints=False)
         TS_chunk.alignCameras()
         nb_aligned_after = len([i for i in TS_chunk.cameras if i.transform])
     aligned_cameras = [i for i in TS_chunk.cameras if i.transform]
@@ -112,6 +113,30 @@ def align_TimeSIFT_chunk(doc, downscale_factor = 1):
     TS_chunk.optimizeCameras()
     TS_chunk.updateTransform()
     print("Temps spent aligning photos : ", time.time() - start_time)
+
+
+def report_color_calibration(chunk, label=""):
+    """
+    Prints what calibrateColors() estimated for the sensors of a chunk (vignetting), to document the processing.
+    Only reads attributes: never fails.
+    """
+    try:
+        for s in chunk.sensors:
+            v = getattr(s, "vignetting", None)
+            print(f"Colour calibration {label}: sensor '{s.label}': vignetting = {v!r}")
+            if v:
+                items = v if isinstance(v, (list, tuple)) else [v]
+                attrs = [a for a in dir(items[0]) if not a.startswith("_")]
+                print(f"    attributes: {attrs}")
+                for k, item in enumerate(items):
+                    vals = {a: getattr(item, a) for a in attrs if not callable(getattr(item, a, None))}
+                    print(f"    band {k}: {vals}")
+        cam = next((c for c in chunk.cameras if c.transform), None)
+        if cam is not None:
+            attrs = [a for a in dir(cam) if not a.startswith("_") and re.search("col|vign|calib", a, re.I)]
+            print(f"Colour calibration {label}: camera attributes {attrs}")
+    except Exception as e:
+        print(f"Colour calibration {label}: report not available ({e})")
 
 
 def split_TimeSIFT_chunk(doc, group_by_flight = False):
@@ -157,6 +182,12 @@ def process_splited_TimeSIFT_chunks_one_by_one(doc, out_dir_ortho = None, out_di
     TS_chunks = [chk for chk in doc.chunks if (re.search("TimeSIFT", chk.label) is None)]
     TS_chunks = [chk for chk in TS_chunks if chk.enabled]
 
+    # Projection of the products. The DEM and the orthomosaic are built directly in it, so that they are not
+    # resampled at the export (the chunk itself is in the coordinate system of the photos, WGS84).
+    proj = scan.OrthoProjection()
+    proj.type=scan.OrthoProjection.Type.Planar
+    proj.crs=scan.CoordinateSystem(crs)
+
     for chk in TS_chunks:
         start_time = time.time()
         NewChunk=chk
@@ -169,19 +200,16 @@ def process_splited_TimeSIFT_chunks_one_by_one(doc, out_dir_ortho = None, out_di
         if from_mesh:
             NewChunk.buildUV(mapping_mode=scan.AdaptiveOrthophotoMapping)
             NewChunk.buildModel(source_data=scan.PointCloudData)
-            NewChunk.buildOrthomosaic(surface_data=scan.ModelData, resolution=resol_ref)
+            NewChunk.buildOrthomosaic(surface_data=scan.ModelData, resolution=resol_ref, projection=proj)
         else:
-            NewChunk.buildDem(source_data=scan.PointCloudData, resolution=resol_ref)
+            NewChunk.buildDem(source_data=scan.PointCloudData, resolution=resol_ref, projection=proj)
             t_DEM = time.time()
             print(f"Time to build DEM : {t_DEM - t_dense_cloud} seconds")
-            NewChunk.buildOrthomosaic(surface_data=scan.ElevationData, resolution=resol_ref)
+            NewChunk.buildOrthomosaic(surface_data=scan.ElevationData, resolution=resol_ref, projection=proj)
             t_ortho = time.time()
             print(f"Time to build ortho : {t_ortho - t_DEM} seconds")
         t_end = time.time()
         print(f"Total process time for the image : {t_end - start_time} seconds")
-        proj = scan.OrthoProjection()
-        proj.type=scan.OrthoProjection.Type.Planar
-        proj.crs=scan.CoordinateSystem(crs)
         img_compress=scan.ImageCompression(tiff_compression = scan.ImageCompression.TiffCompressionLZW, tiff_big = True)
         img_compress.tiff_big = True            #apparently necessary, maybe because of ImageCompression init that doesn't deal with bigTiff ?
         doc.save(os.path.join(out_dir_ortho, '_temp_.psx'))
@@ -196,7 +224,9 @@ def process_splited_TimeSIFT_chunks_one_by_one(doc, out_dir_ortho = None, out_di
             NewChunk.exportRaster(os.path.join(out_dir_ortho, f"{site_name}{str(NewChunk.label)}{suffix}.tif"),source_data=scan.OrthomosaicData, image_format=scan.ImageFormatTIFF,
                                     projection=proj, resolution=resol_ref,clip_to_boundary=True,save_alpha=False, split_in_blocks = True, block_width=10000, block_height=10000, image_compression=img_compress)
 
-        if out_dir_DEM is not None:
+        if out_dir_DEM is not None and from_mesh:
+            print("from_mesh: no DEM is built, nothing exported in out_dir_DEM")
+        elif out_dir_DEM is not None:
             NewChunk.exportRaster(os.path.join(out_dir_DEM, f"{site_name}{str(NewChunk.label)}{suffix}.tif"),source_data=scan.ElevationData, image_format=scan.ImageFormatTIFF, image_compression = img_compress,
                                 projection=proj, resolution=resol_ref,clip_to_boundary=True, save_alpha=False)
 
@@ -219,6 +249,8 @@ def Time_SIFT_process(pathDIR,
                       downscale_factor_depth_map = 2,
                       suffix = "",
                       folder_names = None,
+                      keypoint_limit = 100000,
+                      tiepoint_limit = 10000,
                       ):
     """
     Executes the complete Time_SIFT process : Loads all photos from the input folder and its subdirectories into a Metashape project . These photos will then be merged, aligned,
@@ -241,6 +273,8 @@ def Time_SIFT_process(pathDIR,
     :param bool from_mesh: Generates the orthomosaics based on the mesh model rather than the DEM. In this case, the DEM will not be created.
     :param int downscale_factor_alignement: Alignment accuracy (0 - Highest, 1 - High, 2 - Medium, 4 - Low, 8 - Lowest). Defaults to 1.
     :param int downscale_factor_depth_map: Depth map quality (1 - Ultra high, 2 - High, 4 - Medium, 8 - Low, 16 - Lowest). Defaults to 2.
+    :param int keypoint_limit: keypoints per photo for the alignment (doubled for the photos matched again). Defaults to 100000.
+    :param int tiepoint_limit: tie points per photo for the alignment (doubled for the photos matched again). Defaults to 10000.
 
     :return: None
     """
@@ -257,6 +291,7 @@ def Time_SIFT_process(pathDIR,
         raise ValueError('calibrate_col_by must be "chunk" or "date"')
     sun_sensor = str2bool(sun_sensor)
     group_by_flight = str2bool(group_by_flight)
+    from_mesh = str2bool(from_mesh)
 
     os.makedirs(out_dir_ortho, exist_ok=True)
     
@@ -285,7 +320,8 @@ def Time_SIFT_process(pathDIR,
         TS_chunk = [chk for chk in doc.chunks if (re.search("TimeSIFT", chk.label) is not None)][0]
         TS_chunk.calibrateReflectance(use_sun_sensor=True)
 
-    align_TimeSIFT_chunk(doc, downscale_factor = downscale_factor_alignement)
+    align_TimeSIFT_chunk(doc, downscale_factor = downscale_factor_alignement,
+                         keypoint_limit = keypoint_limit, tiepoint_limit = tiepoint_limit)
     t_align = time.time()
     print(f"Time spent for the alignement : {t_align - t_add_data} seconds")
     
@@ -297,6 +333,7 @@ def Time_SIFT_process(pathDIR,
         TS_chunk = [chk for chk in doc.chunks if (re.search("TimeSIFT", chk.label) is not None)][0]
         print("Colour calibration: all the dates together")
         TS_chunk.calibrateColors(scan.TiePointsData, white_balance=True)
+        report_color_calibration(TS_chunk, "(all the dates)")
 
     doc.save(os.path.join(out_dir_ortho, '_temp_.psx'))
     
@@ -308,6 +345,7 @@ def Time_SIFT_process(pathDIR,
         for chk in [c for c in doc.chunks if re.search("TimeSIFT", c.label) is None and c.enabled]:
             print("Colour calibration of the date", chk.label)
             chk.calibrateColors(scan.TiePointsData, white_balance=True)
+            report_color_calibration(chk, f"({chk.label})")
         doc.save(os.path.join(out_dir_ortho, '_temp_.psx'))
 
     process_splited_TimeSIFT_chunks_one_by_one(doc, 
@@ -358,6 +396,8 @@ if __name__ == '__main__':
     parser.add_argument('--downscale_factor_alignement', type=int, default = 1)
     parser.add_argument('--downscale_factor_depth_map', type=int, default = 2)
     parser.add_argument('--suffix', type=str, default = "")
+    parser.add_argument('--keypoint_limit', type=int, default = 100000)
+    parser.add_argument('--tiepoint_limit', type=int, default = 10000)
     args = parser.parse_args()
 
     if len(sys.argv) > 1:
@@ -379,4 +419,6 @@ if __name__ == '__main__':
                         downscale_factor_depth_map = args.downscale_factor_depth_map,
                         suffix = args.suffix,
                         folder_names = args.folder_names,
+                        keypoint_limit = args.keypoint_limit,
+                        tiepoint_limit = args.tiepoint_limit,
                         )

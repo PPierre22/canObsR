@@ -19,8 +19,10 @@
 #     undistorted/reconstruction.json): reconstruction.json, undistorted/reconstruction.json,
 #     undistorted/tracks.csv, undistorted/reconstruction.nvm, images.json;
 #   - after each epoch, the project is checked: no image of another epoch may be found in it;
-#   - optional colour calibration of the images on the tie points of the whole multi-temporal block
-#     (equivalent of Metashape calibrateColors(), used by the Metashape pipeline of canObsR);
+#   - optional colour calibration of the images on the tie points of the whole multi-temporal block or of each
+#     date (gains per image and channel, vignetting per camera and channel: equivalent of Metashape
+#     calibrateColors(white_balance=True), used by the Metashape pipeline of canObsR);
+#   - ODM options set to reproduce the Metashape pipeline of canObsR (keypoints, GPS accuracy, resolution, no crop);
 #   - a run can be resumed; time spent in each ODM stage is reported.
 #
 # The python standard library is enough, except for the colour calibration (numpy + pillow or gdal).
@@ -44,14 +46,33 @@ SEP = '__'                      # separator between the epoch and the original i
 RESERVED = {BLOCK_NAME, 'time-sift-block'}
 PARAMS_FILE = 'canobs_timesift_params.json'
 EPOCH_PARAMS_FILE = 'canobs_epoch_params.json'   # parameters used for the products of an epoch project
-DENSE_OPTIONS = {'--pc-quality': 1, '--dsm': 0, '--dem-resolution': 1}   # ODM options used after the SfM only
+# ODM options used after the SfM only: number of values and first ODM stage that uses them. A change of these options
+# does not require a new SfM: each epoch is run again from this stage. Any other option is considered as an SfM
+# option (a change requires a new run, overwrite = TRUE).
+EPOCH_STAGES = ['openmvs', 'odm_filterpoints', 'odm_meshing', 'mvs_texturing']
+DENSE_OPTIONS = {'--pc-quality': (1, 'openmvs'), '--pc-skip-geometric': (0, 'openmvs'),
+                 '--pc-filter': (1, 'odm_filterpoints'), '--pc-sample': (1, 'odm_filterpoints'),
+                 '--mesh-size': (1, 'odm_meshing'), '--mesh-octree-depth': (1, 'odm_meshing'),
+                 '--use-3dmesh': (0, 'odm_meshing'), '--skip-3dmodel': (0, 'odm_meshing'),
+                 '--texturing-skip-global-seam-leveling': (0, 'mvs_texturing'),
+                 '--texturing-keep-unseen-faces': (0, 'mvs_texturing'),
+                 '--texturing-single-material': (0, 'mvs_texturing'),
+                 '--crop': (1, 'mvs_texturing'), '--dsm': (0, 'mvs_texturing'), '--dtm': (0, 'mvs_texturing'),
+                 '--dem-resolution': (1, 'mvs_texturing'), '--dem-gapfill-steps': (1, 'mvs_texturing'),
+                 '--dem-decimation': (1, 'mvs_texturing'), '--orthophoto-compression': (1, 'mvs_texturing'),
+                 '--orthophoto-cutline': (0, 'mvs_texturing'), '--skip-report': (0, 'mvs_texturing'),
+                 '--build-overviews': (0, 'mvs_texturing'), '--cog': (0, 'mvs_texturing')}
+# Settings of the Metashape pipeline of canObsR, reproduced with ODM (see the documentation of the engines):
+GPS_ACCURACY = 10               # m, Metashape default accuracy of the camera positions (Reference settings)
+KEYPOINT_LIMIT = 100000         # keypoints per image, Metashape matchPhotos(keypoint_limit) of canObsR
 TIMINGS_FILE = 'timings.csv'
 TMP_NAME = '_tmp'               # default folder of the temporary files, created by generate_Mosa() in out_dir_project
 COLOR_FILE = 'color_gains.csv'
 
 # Metashape downscale factors -> ODM quality levels, at the same image resolution:
 # alignment: Metashape 1 (High) = original images; ODM feature-quality ultra = original images (1),
-#            high = 1/2, medium = 1/4, low = 1/8, lowest = 1/16 (ODM caps feature images at 4480 px)
+#            high = 1/2, medium = 1/4, low = 1/8, lowest = 1/16; ODM never extracts the features on images larger
+#            than 4480 px (hard-coded in opendm/osfm.py): 5472 px images are reduced to 4480 px
 ALIGN_QUALITY = {0: 'ultra', 1: 'ultra', 2: 'high', 4: 'medium', 8: 'low'}
 # depth maps: Metashape 1 (Ultra high) = original images, 2 (High) = 1/2, 4 (Medium) = 1/4 ...;
 #             ODM pc-quality ultra = 1/2 of the images, high = 1/4, medium = 1/8, low = 1/16
@@ -70,6 +91,11 @@ class TimeSiftError(Exception):
 def _safe(name):
     """Makes a string usable as an ODM project / file name (no space, no dot)."""
     return re.sub(r'[^A-Za-z0-9_-]', '_', name)
+
+
+def _text(s):
+    """Printable text: bytes of an ODM file that are not UTF-8 (kept as surrogates) are replaced by '?'."""
+    return str(s).encode('utf-8', 'surrogateescape').decode('utf-8', 'replace').replace('\ufffd', '?')
 
 
 def _stem(name):
@@ -132,7 +158,10 @@ TRACK_REC = struct.Struct('<ifffBBBx')
 
 
 def iter_tracks(path):
-    """Yields (image, track id, (r, g, b), raw bytes of the observation) for both formats; returns the header."""
+    """
+    Yields (image, track id, (r, g, b), raw bytes of the observation, (x, y)) for both formats. x, y are the
+    normalized coordinates of the feature in the (distorted) image: (pixel + 0.5 - size / 2) / max(width, height).
+    """
     with open(path, 'rb') as f:
         header = f.readline()
         m = re.search(rb'_v(\d+)', header)
@@ -155,7 +184,7 @@ def iter_tracks(path):
                     pos += il + tl
                     rec = TRACK_REC.unpack_from(mm, pos)
                     pos += TRACK_REC.size
-                    yield image, track, rec[4:7], mm[start:pos]
+                    yield image, track, rec[4:7], mm[start:pos], rec[1:3]
             finally:
                 mm.close()
         else:
@@ -166,9 +195,10 @@ def iter_tracks(path):
                     continue
                 try:
                     rgb = tuple(int(float(c)) for c in cells[icol:icol + 3])
+                    xy = (float(cells[3]), float(cells[4]))
                 except ValueError:
-                    rgb = (0, 0, 0)
-                yield cells[0].decode('utf-8', 'replace'), cells[1].decode('utf-8', 'replace'), rgb, line
+                    rgb, xy = (0, 0, 0), (0.0, 0.0)
+                yield cells[0].decode('utf-8', 'replace'), cells[1].decode('utf-8', 'replace'), rgb, line, xy
 
 
 def tracks_header(path):
@@ -526,7 +556,7 @@ def filter_tracks(path, valid_stems):
     n_obs = {}
     with open(tmp, 'wb') as fout:
         fout.write(tracks_header(path))
-        for image, track, _, raw in iter_tracks(path):
+        for image, track, _, raw, _ in iter_tracks(path):
             if _stem(image) in valid_stems:
                 fout.write(raw)
                 n_obs[track] = n_obs.get(track, 0) + 1
@@ -614,8 +644,8 @@ def make_epoch_project(workdir, epoch, images, gains=None):
 def retexture_epoch(workdir, epoch, images, gains=None):
     """
     Replaces the undistorted images of an epoch project by new ones (colour-corrected with gains, or the original
-    ones), and deletes the texture and the orthomosaic, so that ODM can be run again from the texturing step only:
-    the alignment, the point cloud and the mesh are kept.
+    ones), and deletes the texture and the orthomosaic, before ODM is run again from a stage after the dense
+    matching (point filtering, meshing or texturing): the alignment and the dense matching are kept.
     """
     block = os.path.join(workdir, BLOCK_NAME)
     dst = os.path.join(workdir, epoch)
@@ -710,7 +740,7 @@ def verify_epoch_project(workdir, epoch, valid_stems, all_epochs):
         check('other', 'images.json', [p.get('filename', '') for p in _read_json(os.path.join(root, 'images.json'))])
     tracks = os.path.join(und, 'tracks.csv')
     if os.path.isfile(tracks):
-        check('other', 'opensfm/undistorted/tracks.csv', {image for image, _, _, _ in iter_tracks(tracks)})
+        check('other', 'opensfm/undistorted/tracks.csv', {obs[0] for obs in iter_tracks(tracks)})
     geo = os.path.join(root, 'odm_report', 'shots.geojson')
     if os.path.isfile(geo):
         check('other', 'odm_report/shots.geojson',
@@ -748,104 +778,274 @@ def verify_projects(workdir, verbose=True):
 # 5. Colour calibration (equivalent of Metashape calibrateColors on tie points)
 # ---------------------------------------------------------------------------------------------
 
-def _fit_gains(I, T, L, n_img, n_iter=30):
+# Vignetting: as in Metashape (camera vignetting modelled by a 3-degree bivariate polynomial), one polynomial per
+# camera (sensor) and per channel, without constant term (no correction at the image centre). It is fitted in log
+# space on the normalized coordinates of the distorted image, scaled to [-1, 1] along the longest side.
+VIGN_TERMS = 9
+
+
+def _vign_terms(u, v):
+    """Monomials u^i v^j with 1 <= i + j <= 3 (last axis)."""
+    import numpy as np
+    return np.stack([u, v, u * u, u * v, v * v, u * u * u, u * u * v, u * v * v, v * v * v], -1)
+
+
+def _fit_gains(I, T, L, n_img, P=None, C=None, n_cam=0, n_iter=60):
     """
-    Alternating least squares: log(colour observed) = a[image] + t[tie point], per channel, with removal of
-    outliers; the mean of a is 0 for each channel. Returns (a, weights of the observations kept).
+    Alternating least squares, independently for each channel, in log space:
+        log(colour observed) = a[image] + t[tie point] + V[camera](x, y)
+    V (vignetting, optional: P = monomials of the observations, C = camera of the observations) is a 3-degree
+    polynomial without constant. Outliers (residual > 3.5 robust sd) are removed twice. The mean of a over the
+    images is 0 for each channel (the overall colour level is not changed).
+    Returns (a, beta, weights of the observations kept); beta: (n_cam, VIGN_TERMS, 3) or None.
     """
     import numpy as np
     _, T = np.unique(T, return_inverse=True)
     n_trk = T.max() + 1
     a = np.zeros((n_img, 3))
+    V = np.zeros_like(L)
+    beta = np.zeros((n_cam, VIGN_TERMS, 3)) if P is not None else None
     w = np.ones(len(I), bool)
+    seen = np.bincount(I, minlength=n_img) > 0
     for it in range(n_iter):
+        R = L - V
         cnt_t = np.maximum(np.bincount(T, w, n_trk), 1)
-        t = np.stack([np.bincount(T, w * (L[:, c] - a[I, c]), n_trk) for c in range(3)], 1) / cnt_t[:, None]
+        t = np.stack([np.bincount(T, w * (R[:, c] - a[I, c]), n_trk) for c in range(3)], 1) / cnt_t[:, None]
         cnt_i = np.maximum(np.bincount(I, w, n_img), 1)
-        a = np.stack([np.bincount(I, w * (L[:, c] - t[T, c]), n_img) for c in range(3)], 1) / cnt_i[:, None]
-        seen = np.bincount(I, minlength=n_img) > 0
-        a[seen] -= a[seen].mean(0)
-        if it in (9, 19):                               # removal of outliers (3.5 robust sd)
-            r = np.abs(L - a[I] - t[T]).max(1)
+        a_new = np.stack([np.bincount(I, w * (R[:, c] - t[T, c]), n_img) for c in range(3)], 1) / cnt_i[:, None]
+        a_new[seen] -= a_new[seen].mean(0)
+        delta = np.abs(a_new - a).max()
+        a = a_new
+        if P is not None:
+            Rv = L - a[I] - t[T]
+            for k in range(n_cam):
+                m = (C == k) & w
+                if m.sum() < 100 * VIGN_TERMS:
+                    continue
+                Pk = P[m].astype(np.float64)
+                A = Pk.T @ Pk
+                A += np.eye(VIGN_TERMS) * 1e-9 * np.trace(A)
+                beta[k] = np.linalg.solve(A, Pk.T @ Rv[m])
+            for k in range(n_cam):
+                m = C == k
+                V[m] = P[m] @ beta[k]
+        if it in (14, 29):                              # removal of outliers (3.5 robust sd)
+            r = np.abs(L - a[I] - t[T] - V).max(1)
             w = r < 3.5 * 1.4826 * np.median(r[w]) + 1e-6
-    return a, w
+        elif it > 30 and delta < 1e-6:
+            break
+    return a, beta, w
 
 
-def compute_color_gains(block_dir, by='chunk', max_obs=3000000, seed=0):
+def _track_sampling(path, max_obs, n_probe=5000):
+    """Fraction of the tie points to keep so that about max_obs observations are read (estimated from the file size)."""
+    size = os.path.getsize(path)
+    n, total = 0, 0
+    for obs in iter_tracks(path):
+        total += len(obs[3])
+        n += 1
+        if n >= n_probe:
+            break
+    if n == 0:
+        return 1.0
+    return min(1.0, max_obs / (size / (total / n)))
+
+
+def compute_color_gains(block_dir, by='chunk', vignetting=True, max_obs=3000000):
     """
-    One gain per image and per channel, so that the tie points have the same colour in all the images where
-    they are seen (equivalent of Metashape calibrateColors on tie points).
+    Colour calibration of the images on the tie points of the multi-temporal block (equivalent of Metashape
+    calibrateColors(TiePointsData, white_balance=True), run by the Metashape pipeline of canObsR): one gain per image
+    and per channel (white_balance=True: each channel corrected separately) and, with vignetting=True, one
+    vignetting polynomial per camera and per channel, so that a tie point has the same colour in all the images
+    where it is seen.
 
-    by = 'chunk': all the images of the multi-temporal block are calibrated together, through the tie points
-           seen in several images of the same date AND of different dates (as in the Metashape pipeline, where
-           calibrateColors() is run on the merged Time-SIFT chunk): colours are harmonised inside each mosaic and
-           between mosaics; the mean of the log gains over all the images is 0.
-    by = 'date': each date (epoch) is calibrated alone, with the tie points seen in several images of this date
-           only: colours are harmonised inside each mosaic, and the colour level of each date is kept (mean of the
-           log gains over the images of the date = 0).
+    by = 'chunk': all the images of the multi-temporal block are calibrated together (as calibrateColors() run on the
+           merged Time-SIFT chunk): colours are harmonised inside each mosaic and between mosaics; the mean of the
+           log gains over all the images is 0.
+    by = 'date': the same tie points and observations, but each date (epoch) is calibrated alone (as
+           calibrateColors() run on each date chunk after the split): a tie point may have a different colour at
+           each date; colours are harmonised inside each mosaic, and the colour level of each date is kept (mean of
+           the log gains over the images of the date = 0). The vignetting is then estimated for each date.
+    Observations that carry no constraint (a tie point seen in only one image of the group) are not used.
 
-    Model: log(colour observed) = log(gain of the image) + log(colour of the tie point), fitted by alternating least
-    squares with removal of outliers. Tie point colours come from OpenSfM tracks.csv (colour of the image at the
-    feature location). Returns ({image stem: (gain_r, gain_g, gain_b)}, {image stem: number of observations used});
-    the gain multiplies the pixel values.
+    Model: log(colour observed) = log(gain of the image) + log(colour of the tie point) + vignetting(x, y), fitted by
+    alternating least squares with removal of outliers. Tie point colours and positions come from OpenSfM tracks.csv
+    (colour of the image at the feature location, normalized coordinates of the feature); dark (< 5) or saturated
+    (> 250) observations are not used; above max_obs observations, a random subset of tie points is used.
+
+    Returns (gains, n_obs, vign, models):
+      gains  {image stem: (gain_r, gain_g, gain_b)}, the gain multiplies the pixel values (clipped to 0.5-2);
+      n_obs  {image stem: number of observations used};
+      vign   {image stem: VIGN_TERMS x 3 coefficients (list) or None}, see vignetting_factor();
+      models list of (group, camera, coefficients) for the report.
     """
     import numpy as np
+    import zlib
+    from array import array
     if by not in ('chunk', 'date'):
         raise ValueError("calibrate_col_by must be 'chunk' or 'date'")
 
     recs = _read_json(os.path.join(block_dir, 'opensfm', 'reconstruction.json'))
     points = {str(p) for rec in recs for p in rec.get('points', {})}
-    shots = {s for rec in recs for s in rec.get('shots', {})}
+    shot_cam = {s: v.get('camera', '') for rec in recs for s, v in rec.get('shots', {}).items()}
+    tracks_path = os.path.join(block_dir, 'opensfm', 'tracks.csv')
+    keep_p = _track_sampling(tracks_path, max_obs)
+    threshold = int(keep_p * 0xFFFFFFFF)
     img_index, trk_index = {}, {}
-    rows_i, rows_t, cols = [], [], []
-    for image, track, rgb, _ in iter_tracks(os.path.join(block_dir, 'opensfm', 'tracks.csv')):
-        if track not in points or image not in shots:
+    rows_i, rows_t, cols, xy = array('i'), array('i'), array('B'), array('f')
+    for image, track, rgb, _, pos in iter_tracks(tracks_path):
+        if track not in points or image not in shot_cam:
+            continue
+        if keep_p < 1 and zlib.crc32(track.encode()) > threshold:
             continue
         if min(rgb) < 5 or max(rgb) > 250:              # dark or saturated
             continue
         rows_i.append(img_index.setdefault(image, len(img_index)))
         rows_t.append(trk_index.setdefault(track, len(trk_index)))
-        cols.append(tuple(float(c) for c in rgb))
+        cols.extend(rgb)
+        xy.extend(pos)
     if not cols:
         raise TimeSiftError('Colour calibration: no tie point colour found in tracks.csv')
     names = sorted(img_index, key=img_index.get)
-    I, T, L = np.array(rows_i), np.array(rows_t), np.log(np.array(cols))
-    if len(I) > max_obs:                                 # random subset of tie points
-        rng = np.random.default_rng(seed)
-        mask = np.zeros(len(trk_index), bool)
-        mask[rng.choice(len(trk_index), size=max(1, int(len(trk_index) * max_obs / len(I))), replace=False)] = True
-        I, T, L = I[mask[T]], T[mask[T]], L[mask[T]]
+    I = np.frombuffer(rows_i, np.int32).astype(np.int64)
+    T = np.frombuffer(rows_t, np.int32).astype(np.int64)
+    L = np.log(np.frombuffer(cols, np.uint8).reshape(-1, 3).astype(np.float64))
+    XY = np.frombuffer(xy, np.float32).reshape(-1, 2) * 2       # [-1, 1] along the longest side
+    cam_names = sorted(set(shot_cam[n] for n in names))
+    img_cam = np.array([cam_names.index(shot_cam[n]) for n in names])
 
     if by == 'chunk':
-        groups = [np.ones(len(I), bool)]
+        groups = [('all', np.ones(len(I), bool))]
     else:
         img_epoch = np.array([epoch_of(n) for n in names])
         obs_epoch = img_epoch[I]
-        groups = [obs_epoch == e for e in np.unique(img_epoch)]
+        groups = [(e, obs_epoch == e) for e in np.unique(img_epoch)]
 
     a = np.zeros((len(names), 3))
     n_obs = np.zeros(len(names))
-    for g in groups:
+    vign = {}
+    models = []
+    for label, g in groups:
         Ig, Tg, Lg = I[g], T[g], L[g]
         _, inv, cnt = np.unique(Tg, return_inverse=True, return_counts=True)
         keep = cnt[inv] >= 2                             # tie points seen in at least 2 images of the group
         if keep.sum() == 0:
             continue
-        ag, wg = _fit_gains(Ig[keep], Tg[keep], Lg[keep], len(names))
-        used = np.unique(Ig[keep])
+        Ig, Tg, Lg = Ig[keep], Tg[keep], Lg[keep]
+        P = C = None
+        if vignetting:
+            XYg = XY[g][keep]
+            P = _vign_terms(XYg[:, 0], XYg[:, 1]).astype(np.float32)
+            C = img_cam[Ig]
+        ag, beta, wg = _fit_gains(Ig, Tg, Lg, len(names), P, C, len(cam_names))
+        used = np.unique(Ig)
         a[used] = ag[used]
-        n_obs += np.bincount(Ig[keep], wg, len(names))
+        n_obs += np.bincount(Ig, wg, len(names))
+        if vignetting:
+            n_cam_obs = np.bincount(C[wg], minlength=len(cam_names))
+            for k, cam in enumerate(cam_names):
+                if 0 < n_cam_obs[k] < 100 * VIGN_TERMS:
+                    log(f'  vignetting ({label}, {_text(cam)}): not estimated, too few observations ({n_cam_obs[k]})')
+                models.append((str(label), _text(cam), beta[k].tolist()))
+            for i in used:
+                vign[_stem(names[i])] = beta[img_cam[i]].tolist()
     gains = np.clip(np.exp(-a), 0.5, 2.0)
-    return {_stem(n): tuple(float(x) for x in gains[k]) for k, n in enumerate(names)}, \
-        {_stem(n): int(n_obs[k]) for k, n in enumerate(names)}
+    return ({_stem(n): tuple(float(x) for x in gains[k]) for k, n in enumerate(names)},
+            {_stem(n): int(n_obs[k]) for k, n in enumerate(names)},
+            vign, models)
 
 
-def save_color_gains(path, gains, n_obs):
+def _project_distorted(cam, x, y):
+    """
+    Normalized image coordinates of the bearing (x, y, 1) in an OpenSfM camera (same formulas as OpenSfM
+    geometry/camera_distortions_functions.h): 'brown' (k1, k2, k3, p1, p2, focal_x, focal_y, c_x, c_y) and
+    'perspective' (k1, k2, focal). Returns None for other camera models.
+    """
+    pt = cam.get('projection_type', 'perspective')
+    k1, k2 = cam.get('k1', 0.0), cam.get('k2', 0.0)
+    r2 = x * x + y * y
+    if pt == 'brown':
+        k3, p1, p2 = cam.get('k3', 0.0), cam.get('p1', 0.0), cam.get('p2', 0.0)
+        radial = 1 + r2 * (k1 + r2 * (k2 + r2 * k3))
+        xd = x * radial + 2 * p1 * x * y + p2 * (r2 + 2 * x * x)
+        yd = y * radial + 2 * p2 * x * y + p1 * (r2 + 2 * y * y)
+        return cam['focal_x'] * xd + cam.get('c_x', 0.0), cam['focal_y'] * yd + cam.get('c_y', 0.0)
+    if pt == 'perspective':
+        radial = 1 + r2 * (k1 + r2 * k2)
+        return cam['focal'] * x * radial, cam['focal'] * y * radial
+    return None
+
+
+def vignetting_factor(beta, width, height, rows, cam=None, ucam=None):
+    """
+    Correction factor exp(-V(x, y)) (rows x width x 3) of the vignetting for some rows of an UNDISTORTED image:
+    the pixel is mapped back to its position in the original (distorted) image, where the vignetting was fitted,
+    through the undistorted camera ucam (OpenSfM 'perspective') and the original camera cam. Without the cameras
+    (or with a camera model that is not handled), the position in the undistorted image is used (approximation).
+    """
+    import numpy as np
+    size = max(width, height)
+    xn = ((np.arange(width) + 0.5 - width / 2.0) / size)[None, :].repeat(len(rows), 0)
+    yn = ((np.asarray(rows) + 0.5 - height / 2.0) / size)[:, None].repeat(width, 1)
+    u, v = xn, yn
+    if cam is not None and ucam is not None and ucam.get('projection_type', 'perspective') == 'perspective':
+        f, k1, k2 = ucam['focal'], ucam.get('k1', 0.0), ucam.get('k2', 0.0)
+        x, y = xn / f, yn / f
+        for _ in range(5 if (k1 or k2) else 0):         # inverse of the radial distortion (0 for OpenSfM output)
+            r2 = x * x + y * y
+            d = 1 + r2 * (k1 + r2 * k2)
+            x, y = xn / f / d, yn / f / d
+        uv = _project_distorted(cam, x, y)
+        if uv is not None:
+            u, v = uv
+    terms = _vign_terms((2 * u).astype(np.float32), (2 * v).astype(np.float32))
+    return np.clip(np.exp(-(terms @ np.asarray(beta, np.float32))), 0.5, 2.0)
+
+
+def save_color_gains(path, gains, n_obs, models=None, cameras=None):
+    """color_gains.csv (one row per image) and, with the vignetting, vignetting.csv (one row per group, camera and
+    channel: coefficients and correction factor at the image corners and at the middle of the long sides)."""
     with open(path, 'w', encoding='utf-8') as f:
         f.write('image,epoch,gain_r,gain_g,gain_b,n_obs\n')
         for k in sorted(gains):
             g = gains[k]
             f.write(f'{k},{epoch_of(k)},{g[0]:.4f},{g[1]:.4f},{g[2]:.4f},{n_obs.get(k, 0)}\n')
+    if not models:
+        return
+    import numpy as np
+    with open(os.path.join(os.path.dirname(path), 'vignetting.csv'), 'w', encoding='utf-8') as f:
+        f.write('group,camera,channel,' + ','.join(f'c{j}' for j in range(VIGN_TERMS)) +
+                ',factor_corner,factor_side\n')
+        for group, cam, beta in models:
+            c = (cameras or {}).get(cam, {})
+            ratio = min(c.get('width', 3), c.get('height', 2)) / max(c.get('width', 3), c.get('height', 2))
+            b = np.asarray(beta)
+            corner = np.exp(-(_vign_terms(np.array([1., 1., -1., -1.]), np.array([ratio, -ratio, ratio, -ratio])) @ b)).mean(0)
+            side = np.exp(-(_vign_terms(np.array([1., -1.]), np.array([0., 0.])) @ b)).mean(0)
+            for ch, name in enumerate('rgb'):
+                f.write(f'{group},"{cam}",{name},' + ','.join(f'{x:.6g}' for x in b[:, ch]) +
+                        f',{corner[ch]:.4f},{side[ch]:.4f}\n')
+
+
+def color_corrections(block_dir, gains, vign):
+    """{image stem: correction} for apply_gain(): gain, vignetting and the cameras needed to map the vignetting."""
+    if gains is None:
+        return None
+    cams, ucams, shot_cam = {}, {}, {}
+    rec_path = os.path.join(block_dir, 'opensfm', 'reconstruction.json')
+    urec_path = os.path.join(block_dir, 'opensfm', 'undistorted', 'reconstruction.json')
+    for rec in _read_json(rec_path):
+        cams.update(rec.get('cameras', {}))
+        shot_cam.update({_stem(s): v.get('camera') for s, v in rec.get('shots', {}).items()})
+    if os.path.isfile(urec_path):
+        for rec in _read_json(urec_path):
+            ucams.update(rec.get('cameras', {}))
+    out = {}
+    for stem, g in gains.items():
+        cam = shot_cam.get(stem)
+        out[stem] = {'gain': g, 'vign': (vign or {}).get(stem),
+                     'cam': cams.get(cam), 'ucam': ucams.get(cam)}
+    return out
 
 
 def write_tiff(path, arr):
@@ -899,8 +1099,11 @@ def write_tiff(path, arr):
         f.write(b'II*\x00' + struct.pack('<I', 8) + ifd + extra + data)
 
 
-def apply_gain(src, dst, gain):
-    """Writes a colour-corrected copy of an image (the source, possibly hard-linked, is not modified)."""
+def apply_gain(src, dst, corr):
+    """
+    Writes a colour-corrected copy of an (undistorted) image; the source, possibly hard-linked, is not modified.
+    corr: (gain_r, gain_g, gain_b), or a dict from color_corrections() (gain and vignetting).
+    """
     import numpy as np
     try:
         from PIL import Image
@@ -913,10 +1116,20 @@ def apply_gain(src, dst, gain):
         arr = ds.ReadAsArray()
         arr = np.moveaxis(arr, 0, -1) if arr.ndim == 3 else arr
         ds = None
+    if not isinstance(corr, dict):
+        corr = {'gain': corr, 'vign': None}
+    gain = np.asarray(corr['gain'], np.float32)
     out = arr.astype(np.float32)
-    if out.ndim == 3:
-        for c in range(min(3, out.shape[-1])):
-            out[..., c] *= gain[c]
+    if out.ndim == 3 and out.shape[-1] >= 3:
+        h, w = out.shape[:2]
+        if corr.get('vign') is not None:
+            step = 256
+            for r0 in range(0, h, step):
+                rows = np.arange(r0, min(h, r0 + step))
+                f = vignetting_factor(corr['vign'], w, h, rows, corr.get('cam'), corr.get('ucam'))
+                out[r0:r0 + len(rows), :, :3] *= f * gain
+        else:
+            out[..., :3] *= gain
     vmax = np.iinfo(arr.dtype).max if np.issubdtype(arr.dtype, np.integer) else None
     if vmax is not None:
         out = np.clip(np.rint(out), 0, vmax)
@@ -931,7 +1144,7 @@ def _split_options(options):
     sfm, dense, k = [], [], 0
     while k < len(options):
         o = options[k]
-        n = DENSE_OPTIONS.get(o)
+        n = DENSE_OPTIONS.get(o, (None,))[0]
         if n is None:
             sfm.append(o)
             k += 1
@@ -939,6 +1152,34 @@ def _split_options(options):
             dense += options[k:k + 1 + n]
             k += 1 + n
     return sfm, dense
+
+
+def _options_dict(options):
+    """{option: tuple of values} of a list of dense options (see DENSE_OPTIONS)."""
+    out, k = {}, 0
+    while k < len(options):
+        n = DENSE_OPTIONS.get(options[k], (0,))[0]
+        out[options[k]] = tuple(options[k + 1:k + 1 + n])
+        k += 1 + n
+    return out
+
+
+def rerun_stage(old_ep, new_ep):
+    """
+    First ODM stage to run again for an epoch whose products were made with the parameters old_ep (None: nothing to
+    run again; 'openmvs': the epoch project is rebuilt).
+    """
+    if old_ep == new_ep:
+        return None
+    if not old_ep or 'dense_options' not in old_ep:
+        return 'openmvs'
+    old, new = _options_dict(old_ep['dense_options']), _options_dict(new_ep['dense_options'])
+    stages = [DENSE_OPTIONS.get(o, (0, 'openmvs'))[1] for o in set(old) | set(new) if old.get(o) != new.get(o)]
+    if any(old_ep.get(k) != new_ep.get(k) for k in new_ep if k != 'dense_options'):
+        stages.append('mvs_texturing')                  # colour calibration
+    if not stages:
+        return 'mvs_texturing'
+    return min(stages, key=EPOCH_STAGES.index)
 
 
 def _upgrade_params(old, workdir):
@@ -974,6 +1215,9 @@ def timesift_odm_process(pathDIR,
                          folder_names=None,
                          calibrate_col=True,
                          calibrate_col_by='chunk',
+                         calibrate_vignetting=True,
+                         keypoint_limit=KEYPOINT_LIMIT,
+                         from_mesh=False,
                          check_dates=True,
                          odm_path=None,
                          odm_runner="native",
@@ -995,6 +1239,12 @@ def timesift_odm_process(pathDIR,
     :param bool calibrate_col: colour calibration of the images on the tie points.
     :param str calibrate_col_by: 'chunk' (all the dates together: inside and between mosaics) or 'date' (each date
         alone: inside each mosaic only). See compute_color_gains().
+    :param bool calibrate_vignetting: with calibrate_col, also corrects the vignetting (one polynomial per camera and
+        channel, fitted on the same tie points), as Metashape calibrateColors() does.
+    :param int keypoint_limit: number of keypoints per image (Metashape keypoint_limit; ODM --min-num-features,
+        which is the number of features extracted per image).
+    :param bool from_mesh: orthomosaic computed on the full 3D mesh (ODM --use-3dmesh) instead of the 2.5D one, as
+        Metashape from_mesh; no DSM is then produced (as with Metashape).
     :param bool check_dates: reports the EXIF days of the images of each folder (information only, no error).
     :param str odm_path: native: path of run.bat / run.sh ; docker: image name ; apptainer: image file.
     :param str odm_runner: 'native', 'docker' or 'apptainer'.
@@ -1030,11 +1280,28 @@ def timesift_odm_process(pathDIR,
     if int(downscale_factor_alignement) not in ALIGN_QUALITY or int(downscale_factor_depth_map) not in DEPTH_QUALITY:
         raise ValueError('downscale_factor_alignement must be in 0, 1, 2, 4, 8 and downscale_factor_depth_map in 1, 2, 4, 8, 16')
 
+    # Options chosen to reproduce the Metashape pipeline of canObsR (see the documentation of the engines):
+    #  --ignore-gsd: products at resol_ref even when ODM estimates a coarser GSD, undistorted images at full size
+    #                (by default ODM caps the resolution at its GSD estimate - 10 %);
+    #  --crop 0: no buffer removed around the products (by default ODM removes 3 m along the edges);
+    #  --gps-accuracy 10: accuracy of the GPS positions in the bundle adjustment (Metashape default: 10 m);
+    #  --min-num-features: number of keypoints per image (Metashape keypoint_limit).
     options = ['--orthophoto-resolution', str(float(resol_ref) * 100),
                '--feature-quality', ALIGN_QUALITY[int(downscale_factor_alignement)],
+               '--min-num-features', str(int(keypoint_limit)),
+               '--gps-accuracy', str(GPS_ACCURACY),
+               '--ignore-gsd',
                '--pc-quality', DEPTH_QUALITY[int(downscale_factor_depth_map)],
+               '--crop', '0',
                '--orthophoto-compression', 'LZW',
-               '--skip-3dmodel', '--skip-report']
+               '--skip-report']
+    if from_mesh:
+        options += ['--use-3dmesh']
+        if out_dir_DEM is not None:
+            log('from_mesh: no DSM is produced (as with Metashape)')
+            out_dir_DEM = None
+    else:
+        options += ['--skip-3dmodel']
     if out_dir_DEM is not None:
         options += ['--dsm', '--dem-resolution', str(float(resol_ref) * 100)]
     options += [str(a) for a in (odm_args or [])]
@@ -1054,7 +1321,8 @@ def timesift_odm_process(pathDIR,
     params = {'version': 2, 'images': {e: sorted(n for _, n in i) for e, i in epochs.items()},
               'sfm_options': sfm_options}
     epoch_params = {'dense_options': dense_options, 'calibrate_col': bool(calibrate_col),
-                    'calibrate_col_by': calibrate_col_by if calibrate_col else None}
+                    'calibrate_col_by': calibrate_col_by if calibrate_col else None,
+                    'vignetting': bool(calibrate_vignetting) if calibrate_col else None}
     params_path = os.path.join(workdir, PARAMS_FILE)
     if [e for e in os.listdir(workdir) if e != TMP_NAME]:
         old = None
@@ -1062,7 +1330,8 @@ def timesift_odm_process(pathDIR,
             with open(params_path, encoding='utf-8') as f:
                 old = _upgrade_params(json.load(f), workdir)
         if old is None or old['images'] != params['images'] or old['sfm_options'] != params['sfm_options']:
-            raise TimeSiftError(f'{workdir} contains a previous run made with other images or SfM parameters. '
+            raise TimeSiftError(f'{workdir} contains a previous run made with other images or SfM parameters '
+                                f'(canObsR 0.0.0.9012 changed the SfM parameters to reproduce Metashape). '
                                 f'Use overwrite = TRUE to delete it, or give another out_dir_project.')
     with open(params_path, 'w', encoding='utf-8') as f:
         json.dump(params, f, indent=1)
@@ -1088,12 +1357,27 @@ def timesift_odm_process(pathDIR,
     # 2. colour calibration on the tie points of the whole block
     gains = None
     if calibrate_col:
-        gains, n_obs = compute_color_gains(block_dir, by=calibrate_col_by)
-        save_color_gains(os.path.join(workdir, COLOR_FILE), gains, n_obs)
-        g = list(gains.values())
+        g, n_obs, vign, models = compute_color_gains(block_dir, by=calibrate_col_by, vignetting=calibrate_vignetting)
+        cams = {}
+        for rec in _read_json(os.path.join(block_dir, 'opensfm', 'reconstruction.json')):
+            cams.update({_text(k): v for k, v in rec.get('cameras', {}).items()})
+        save_color_gains(os.path.join(workdir, COLOR_FILE), g, n_obs, models, cams)
+        gains = color_corrections(block_dir, g, vign)
+        v = list(g.values())
         log(f'Colour calibration ({"all dates together" if calibrate_col_by == "chunk" else "date by date"}): '
-            f'{len(g)} images, gains from {min(min(x) for x in g):.2f} to {max(max(x) for x in g):.2f} '
+            f'{len(v)} images, gains from {min(min(x) for x in v):.2f} to {max(max(x) for x in v):.2f} '
             f'(details in {COLOR_FILE})')
+        if models:
+            import numpy as np
+            for group, cam, beta in models:
+                ratio = 2 / 3
+                c = cams.get(cam, {})
+                if c.get('width') and c.get('height'):
+                    ratio = min(c['width'], c['height']) / max(c['width'], c['height'])
+                corner = float(np.exp(-(_vign_terms(np.array([1., 1., -1., -1.]),
+                                                    np.array([ratio, -ratio, ratio, -ratio])) @ np.asarray(beta))).mean())
+                log(f'  vignetting ({group}, {cam}): mean correction x{corner:.3f} at the image corners '
+                    f'(details in vignetting.csv)')
 
     # 3. dense matching, DSM and orthomosaic for each epoch
     results = {}
@@ -1106,14 +1390,18 @@ def timesift_odm_process(pathDIR,
         if os.path.isfile(ortho) and os.path.isfile(ep_file):
             with open(ep_file, encoding='utf-8') as f:
                 old_ep = json.load(f)
-        if old_ep == epoch_params:
+        stage = rerun_stage(old_ep, epoch_params)
+        if stage is None:
             log(f'Epoch {epoch}: orthomosaic already computed with the same parameters, skipped')
         else:
-            if old_ep is not None and old_ep.get('dense_options') == epoch_params['dense_options']:
-                log(f'Epoch {epoch}: only the colour calibration changed: texture and orthomosaic computed again '
-                    f'(alignment, point cloud and mesh kept)')
+            if old_ep is not None and stage != 'openmvs':
+                kept = {'odm_filterpoints': 'alignment and dense matching',
+                        'odm_meshing': 'alignment and point cloud',
+                        'mvs_texturing': 'alignment, point cloud and mesh'}[stage]
+                log(f'Epoch {epoch}: parameters changed after the dense matching: ODM run again from {stage} '
+                    f'({kept} kept)')
                 retexture_epoch(workdir, epoch, images, gains)
-                rerun = ['--rerun-from', 'mvs_texturing']
+                rerun = ['--rerun-from', stage]
             else:
                 if os.path.isdir(os.path.join(workdir, epoch)):
                     shutil.rmtree(os.path.join(workdir, epoch))    # unfinished run, or other parameters
@@ -1164,6 +1452,9 @@ def main():
     p.add_argument('--suffix', default="")
     p.add_argument('--no_calibrate_col', action='store_true')
     p.add_argument('--calibrate_col_by', default='chunk', choices=['chunk', 'date'])
+    p.add_argument('--no_vignetting', action='store_true')
+    p.add_argument('--keypoint_limit', type=int, default=KEYPOINT_LIMIT)
+    p.add_argument('--from_mesh', action='store_true')
     p.add_argument('--no_check_dates', action='store_true')
     p.add_argument('--odm_path', default=None)
     p.add_argument('--odm_runner', default='native', choices=['native', 'docker', 'apptainer'])
@@ -1176,6 +1467,8 @@ def main():
                          downscale_factor_alignement=args.downscale_factor_alignement,
                          downscale_factor_depth_map=args.downscale_factor_depth_map, suffix=args.suffix,
                          calibrate_col=not args.no_calibrate_col, calibrate_col_by=args.calibrate_col_by,
+                         calibrate_vignetting=not args.no_vignetting, keypoint_limit=args.keypoint_limit,
+                         from_mesh=args.from_mesh,
                          check_dates=not args.no_check_dates,
                          odm_path=args.odm_path, odm_runner=args.odm_runner, odm_args=odm_args,
                          overwrite=args.overwrite, keep_project=True if args.keep_project else None)
