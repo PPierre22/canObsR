@@ -265,6 +265,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
 # Otherwise (other crs), the raster is reprojected (bilinear) on a grid aligned on multiples of res.
 .format_odm_raster <- function(f, crs, res, type = c("ortho", "dem")) {
    type <- match.arg(type)
+   crs <- .crs_r(crs)
    r <- terra::rast(f)
    gdal <- c("COMPRESS=LZW", "BIGTIFF=IF_SAFER", "TILED=YES")
    out <- paste0(tools::file_path_sans_ext(f), "_canobs_tmp.tif")
@@ -322,9 +323,12 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    invisible(f)
 }
 
+# crs written for Metashape ("EPSG::32633") -> form read by sf / terra ("EPSG:32633")
+.crs_r <- function(x) if (is.character(x)) sub("^EPSG::", "EPSG:", x, ignore.case = TRUE) else x
+
 # TRUE if the two coordinate reference systems are the same (e.g. ODM "+proj=utm +zone=33 +datum=WGS84" and "EPSG:32633")
 .same_crs <- function(a, b) {
-   isTRUE(tryCatch(sf::st_crs(a) == sf::st_crs(b), error = function(e) FALSE))
+   isTRUE(tryCatch(suppressWarnings(sf::st_crs(.crs_r(a)) == sf::st_crs(.crs_r(b))), error = function(e) FALSE))
 }
 
 .crs_label <- function(x) {
