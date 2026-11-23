@@ -434,6 +434,22 @@ STAGE_RE = re.compile(r'\[INFO\]\s+(Running|Finished) (\S+) stage')
 GPU_RE = re.compile(r'(?i)\b(gpu|cuda)\b')
 
 
+def check_odm_gpu(odm_path):
+    """
+    Native ODM on Windows: the installer puts a dummy nvcuda.dll (a few KB) next to OpenMVS, in
+    SuperBuild/install/bin. Windows loads it instead of the NVIDIA driver (C:/Windows/System32/nvcuda.dll):
+    OpenMVS cannot start CUDA, fails, and ODM runs it again on the CPU without saying so. Measured on verzy
+    (Quadro RTX 6000): dense matching 3.7 x faster once the dummy DLL is renamed. Only logs a warning.
+    """
+    if os.name != 'nt' or not odm_path:
+        return
+    dummy = os.path.join(os.path.dirname(os.path.abspath(odm_path)), 'SuperBuild', 'install', 'bin', 'nvcuda.dll')
+    real = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'nvcuda.dll')
+    if os.path.isfile(dummy) and os.path.getsize(dummy) < 1e6 and os.path.isfile(real):
+        log(f'WARNING: ODM will not use the NVIDIA GPU: the dummy {dummy} hides the driver. Rename it '
+            f'(e.g. nvcuda.dll.odm_dummy) to let OpenMVS use the GPU (about 3-4 x faster dense matching).')
+
+
 def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
     """Runs ODM, writes its log in datasets_dir/odm_<project>.log and the time spent in each stage in timings.csv."""
     cmd = odm_command(runner, odm_path, datasets_dir, project, options)
@@ -1266,6 +1282,8 @@ def timesift_odm_process(pathDIR,
     if keep_project is None:
         keep_project = out_dir_project is not None
     workdir = os.path.abspath(out_dir_project) if out_dir_project else os.path.join(out_dir_ortho, '_odm_timesift_')
+    if odm_runner == 'native':
+        check_odm_gpu(odm_path)
     if os.path.commonpath([workdir, os.path.abspath(pathDIR)]) == os.path.abspath(pathDIR):
         raise TimeSiftError('out_dir_project must not be inside path_in')
     if overwrite and os.path.isdir(workdir):
