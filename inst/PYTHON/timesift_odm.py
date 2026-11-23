@@ -434,20 +434,44 @@ STAGE_RE = re.compile(r'\[INFO\]\s+(Running|Finished) (\S+) stage')
 GPU_RE = re.compile(r'(?i)\b(gpu|cuda)\b')
 
 
-def check_odm_gpu(odm_path):
+def check_odm_gpu(odm_path, fix=True):
     """
     Native ODM on Windows: the installer puts a dummy nvcuda.dll (a few KB) next to OpenMVS, in
-    SuperBuild/install/bin. Windows loads it instead of the NVIDIA driver (C:/Windows/System32/nvcuda.dll):
-    OpenMVS cannot start CUDA, fails, and ODM runs it again on the CPU without saying so. Measured on verzy
-    (Quadro RTX 6000): dense matching 3.7 x faster once the dummy DLL is renamed. Only logs a warning.
+    SuperBuild/install/bin, so that OpenMVS starts on PCs without an NVIDIA card. Windows loads it instead of the
+    NVIDIA driver (C:/Windows/System32/nvcuda.dll): OpenMVS cannot start CUDA, fails, and ODM runs it again on the
+    CPU without saying so. Measured on verzy (Quadro RTX 6000): dense matching 3.7 x faster without the dummy DLL.
+
+    When the NVIDIA driver is installed and fix=True, the dummy DLL is renamed nvcuda.dll.odm_dummy (to undo: rename
+    it back). Every ODM installation or update puts it back: this check runs before each Time-SIFT run.
+    Returns a dict: status = 'not_windows' | 'no_dummy' | 'no_nvidia_driver' | 'renamed' | 'dummy_present', path.
     """
     if os.name != 'nt' or not odm_path:
-        return
+        return {'status': 'not_windows', 'path': ''}
     dummy = os.path.join(os.path.dirname(os.path.abspath(odm_path)), 'SuperBuild', 'install', 'bin', 'nvcuda.dll')
     real = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'nvcuda.dll')
-    if os.path.isfile(dummy) and os.path.getsize(dummy) < 1e6 and os.path.isfile(real):
-        log(f'WARNING: ODM will not use the NVIDIA GPU: the dummy {dummy} hides the driver. Rename it '
-            f'(e.g. nvcuda.dll.odm_dummy) to let OpenMVS use the GPU (about 3-4 x faster dense matching).')
+    if not (os.path.isfile(dummy) and os.path.getsize(dummy) < 1e6):
+        return {'status': 'no_dummy', 'path': dummy}
+    if not os.path.isfile(real):
+        return {'status': 'no_nvidia_driver', 'path': dummy}            # the dummy is needed: kept
+    if fix:
+        try:
+            target = dummy + '.odm_dummy'
+            if os.path.exists(target):
+                os.remove(target)
+            os.rename(dummy, target)
+            log('*' * 100)
+            log(f'GPU: the dummy {dummy} (installed by ODM) hid the NVIDIA driver and forced OpenMVS on the CPU.')
+            log(f'GPU: it has been renamed {os.path.basename(target)}: OpenMVS now uses the GPU.')
+            log('*' * 100)
+            return {'status': 'renamed', 'path': target}
+        except OSError as e:
+            log(f'GPU: the dummy DLL could not be renamed ({e})')
+    log('!' * 100)
+    log('!!! ODM WILL NOT USE THE GPU (dense matching 3-4 x slower).')
+    log(f'!!! The dummy {dummy} (installed by ODM) hides the NVIDIA driver.')
+    log('!!! Rename it nvcuda.dll.odm_dummy (administrator rights on the ODM folder), or run R as administrator.')
+    log('!' * 100)
+    return {'status': 'dummy_present', 'path': dummy}
 
 
 def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
@@ -1234,6 +1258,7 @@ def timesift_odm_process(pathDIR,
                          calibrate_vignetting=True,
                          keypoint_limit=KEYPOINT_LIMIT,
                          from_mesh=False,
+                         odm_gpu_fix=True,
                          check_dates=True,
                          odm_path=None,
                          odm_runner="native",
@@ -1283,7 +1308,7 @@ def timesift_odm_process(pathDIR,
         keep_project = out_dir_project is not None
     workdir = os.path.abspath(out_dir_project) if out_dir_project else os.path.join(out_dir_ortho, '_odm_timesift_')
     if odm_runner == 'native':
-        check_odm_gpu(odm_path)
+        check_odm_gpu(odm_path, fix=odm_gpu_fix)
     if os.path.commonpath([workdir, os.path.abspath(pathDIR)]) == os.path.abspath(pathDIR):
         raise TimeSiftError('out_dir_project must not be inside path_in')
     if overwrite and os.path.isdir(workdir):

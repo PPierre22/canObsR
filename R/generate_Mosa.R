@@ -87,6 +87,11 @@
 #'   points between dates. With Metashape, the photos that are not aligned are matched again with twice this limit.
 #' @param tiepoint_limit integer. Only for `engine = "metashape"`: maximum number of tie points kept per image (Metashape
 #'   `tiepoint_limit`, default 10000; doubled for the photos matched again). ODM has no equivalent.
+#' @param odm_gpu_fix logical. Only for `engine = "odm"` on Windows. The ODM installer puts a dummy `nvcuda.dll` next to
+#'   OpenMVS (`SuperBuild/install/bin`), which hides the NVIDIA driver: OpenMVS then runs on the CPU, 3 to 4 times
+#'   slower, without any message. With `TRUE` (default), when an NVIDIA driver is installed, this file is renamed
+#'   `nvcuda.dll.odm_dummy` before each run (each ODM installation or update puts it back). If it cannot be renamed
+#'   (rights on the ODM folder), or with `FALSE`, a warning is given.
 #' @param calibrate_vignetting logical. Only for `engine = "odm"`, with `calibrate_col`: also corrects the vignetting of
 #'   the camera, estimated on the same tie points (Metashape `calibrateColors()` estimates it too).
 #'
@@ -147,7 +152,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                        odm_args = NULL, overwrite = FALSE, check_dates = TRUE,
                        tempdir_custom = getOption("canObsR.tempdir", NULL),
                        keypoint_limit = 100000L, tiepoint_limit = 10000L,
-                       calibrate_vignetting = TRUE) {
+                       calibrate_vignetting = TRUE, odm_gpu_fix = TRUE) {
 
    engine <- match.arg(engine)
    calibrate_col_by <- match.arg(calibrate_col_by)
@@ -220,6 +225,9 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
 
    reticulate::source_python(system.file("PYTHON/timesift_odm.py", package = "canObsR"), envir = py)
 
+   # GPU: ODM's dummy nvcuda.dll hides the NVIDIA driver on Windows (OpenMVS then runs on the CPU, 3-4 x slower)
+   if (odm_runner == "native") .check_odm_gpu(py, odm_path, odm_gpu_fix)
+
    res <- py$timesift_odm_process(pathDIR = path_in,
                                   out_dir_ortho = out_dir_ortho,
                                   out_dir_DEM = out_dir_DEM,
@@ -240,6 +248,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                                   calibrate_vignetting = calibrate_vignetting,
                                   keypoint_limit = as.integer(keypoint_limit),
                                   from_mesh = from_mesh,
+                                  odm_gpu_fix = FALSE,
                                   check_dates = check_dates,
                                   tmp_dir = tmp_sub
                                   )
@@ -329,6 +338,23 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    file.remove(f)
    file.rename(out, f)
    invisible(f)
+}
+
+# GPU check of native ODM on Windows (see odm_gpu_fix): a banner and a warning that cannot be missed
+.check_odm_gpu <- function(py, odm_path, fix = TRUE) {
+   g <- tryCatch(py$check_odm_gpu(odm_path, fix = fix), error = function(e) list(status = "error", path = conditionMessage(e)))
+   bar <- strrep("=", 90)
+   if (identical(g$status, "renamed")) {
+      message(bar, "\nGPU: ODM's dummy nvcuda.dll hid the NVIDIA driver. It has been renamed:\n   ", g$path,
+              "\nOpenMVS (dense matching) now uses the GPU.\n", bar)
+   } else if (identical(g$status, "dummy_present")) {
+      msg <- paste0("ODM WILL NOT USE THE GPU (dense matching 3-4 x slower): the dummy file\n   ", g$path,
+                    "\nhides the NVIDIA driver. Rename it nvcuda.dll.odm_dummy (administrator rights on the ODM folder),",
+                    "\nor run generate_Mosa() with odm_gpu_fix = TRUE from an R session started as administrator.")
+      message(bar, "\n", msg, "\n", bar)
+      warning(msg, call. = FALSE, immediate. = TRUE)
+   }
+   invisible(g)
 }
 
 # crs written for Metashape ("EPSG::32633") -> form read by sf / terra ("EPSG:32633")

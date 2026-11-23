@@ -30,7 +30,8 @@ default("dir_out",   file.path(my_path, "compare_engines"))
 default("py_file",   "D:/canObsR/compare_engines.py")             # python file delivered with this script
 default("conda_env", "C:/ProgramData/miniconda3/envs/arosics")    # environment with arosics
 default("tmp_dir",   "D:/canObsR/tmp/compare")                    # temporary files of terra (not on C:)
-default("CPUs",      NULL)                                        # NULL = all
+default("CPUs",      NULL)                                        # NULL = 16 processes
+default("engines_A", c("Metashape", "ODM"))                       # section A: engines to compare between dates
 # --------------------------------------------------------------------------------------------------
 
 if (!py_available()) use_condaenv(conda_env, required = TRUE)
@@ -57,7 +58,7 @@ run_pair <- function(ref, tgt, name) {
 # ---- A. between dates, inside each engine --------------------------------------------------------
 tabA <- NULL
 if (length(dates) > 1) {
-   for (eng in c("Metashape", "ODM")) {
+   for (eng in engines_A) {
       s <- if (eng == "Metashape") s_ref else s_odm
       for (d in dates[-1]) {
          tabA <- rbind(tabA, cbind(engine = eng, date_ref = dates[1], date = d,
@@ -98,7 +99,7 @@ num <- function(x, k = 3) formatC(x, format = "f", digits = k)
 out <- c("Comparison Metashape (reference) vs ODM", paste("Dates:", paste(dates, collapse = ", ")), "")
 if (!is.null(tabA)) {
    out <- c(out, "A. Co-registration between dates (each date vs the first one; smaller = better Time-SIFT)")
-   for (eng in c("Metashape", "ODM")) {
+   for (eng in unique(tabA$engine)) {
       x <- tabA[tabA$engine == eng, ]
       out <- c(out, sprintf("   %-9s median |shift| per date: %s m | p90: %s m | valid points: %s %%", eng,
                             paste(num(x$median_abs_m), collapse = ", "), paste(num(x$p90_abs_m), collapse = ", "),

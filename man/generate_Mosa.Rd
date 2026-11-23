@@ -31,7 +31,8 @@ generate_Mosa(
   tempdir_custom = getOption("canObsR.tempdir", NULL),
   keypoint_limit = 100000L,
   tiepoint_limit = 10000L,
-  calibrate_vignetting = TRUE
+  calibrate_vignetting = TRUE,
+  odm_gpu_fix = TRUE
 )
 }
 \arguments{
@@ -115,6 +116,12 @@ points between dates. With Metashape, the photos that are not aligned are matche
 
 \item{calibrate_vignetting}{logical. Only for \code{engine = "odm"}, with \code{calibrate_col}: also corrects the vignetting of
 the camera, estimated on the same tie points (Metashape \code{calibrateColors()} estimates it too).}
+
+\item{odm_gpu_fix}{logical. Only for \code{engine = "odm"} on Windows. The ODM installer puts a dummy \code{nvcuda.dll} next to
+OpenMVS (\code{SuperBuild/install/bin}), which hides the NVIDIA driver: OpenMVS then runs on the CPU, 3 to 4 times
+slower, without any message. With \code{TRUE} (default), when an NVIDIA driver is installed, this file is renamed
+\code{nvcuda.dll.odm_dummy} before each run (each ODM installation or update puts it back). If it cannot be renamed
+(rights on the ODM folder), or with \code{FALSE}, a warning is given.}
 }
 \value{
 None (metashape) or, invisibly, the paths of the orthomosaics (odm).
