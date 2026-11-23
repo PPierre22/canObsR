@@ -55,34 +55,39 @@ if (!file.exists(scene)) stop("Not found: ", scene, " (ODM project of benchmark2
 # DensifyPointCloud is run and waited for (exit code kept); in the background, PowerShell writes every second
 # the CUDA DLLs the running program has loaded (the nvcuda.dll really used), until it finds some.
 read_safe <- function(f) tryCatch(readLines(f, warn = FALSE), error = function(e) character(0))
-run_densify_test <- function(label) {
+run_densify_test <- function(label, cuda_device = "-1") {
    wdir <- file.path(gpu_scene_dir, paste0("gputest_", label))      # same depth as ODM's 'depthmaps' folder
    unlink(wdir, recursive = TRUE); dir.create(wdir)
    gpu_log  <- file.path(gpu_out_dir, paste0("gpu_usage_", label, ".csv"))
    mod_file <- file.path(gpu_out_dir, paste0("modules_", label, ".txt"))
    out_txt  <- file.path(gpu_out_dir, paste0("densify_", label, "_console.txt"))
    unlink(c(gpu_log, mod_file, out_txt))
-   system2(smi, c("--query-gpu=timestamp,utilization.gpu,memory.used", "--format=csv,noheader,nounits",
-                  "-l", "1", "-f", shQuote(win(gpu_log))), wait = FALSE)
+   apps_log <- file.path(gpu_out_dir, paste0("gpu_apps_", label, ".txt"))
+   stop_file <- file.path(gpu_out_dir, paste0("stop_", label))
+   unlink(c(apps_log, stop_file))
+   # every 0.5 s: GPU use, programs using the GPU, CUDA DLLs loaded by DensifyPointCloud (appended at once, no buffer)
    system2("powershell", c("-NoProfile", "-Command", shQuote(sprintf(paste0(
-      "for ($i = 0; $i -lt 120; $i++) { Start-Sleep 1; ",
+      "while (-not (Test-Path '%s')) { ",
+      "& '%s' --query-gpu=timestamp,utilization.gpu,memory.used --format=csv,noheader,nounits | Add-Content -Path '%s'; ",
+      "& '%s' --query-compute-apps=pid,process_name,used_memory --format=csv,noheader | Add-Content -Path '%s'; ",
       "$m = (Get-Process DensifyPointCloud -ErrorAction SilentlyContinue).Modules | ",
       "Where-Object { $_.ModuleName -match '^(nvcuda|cudart)' } | ForEach-Object { $_.FileName }; ",
-      "if ($m) { $m | Out-File -Encoding ascii '%s'; break } }"), win(mod_file)))), wait = FALSE)
+      "if ($m) { $m | Add-Content -Path '%s' }; Start-Sleep -Milliseconds 500 }"),
+      win(stop_file), win(smi), win(gpu_log), win(smi), win(apps_log), win(mod_file)))), wait = FALSE)
+   Sys.sleep(3)
    args <- c(shQuote(win(scene)), "--resolution-level", "2",
              "--dense-config-file", shQuote(win(file.path(gpu_scene_dir, "Densify.ini"))),
              "--max-resolution", "5472", "--min-resolution", "640", "--number-views-fuse", "2",
              "--sub-resolution-levels", "2", "--archive-type", "3",
              "-w", shQuote(win(wdir)), "-o", shQuote(win(file.path(wdir, "scene_dense_test.mvs"))),
-             "-v", "2", "--cuda-device", "-1")
+             "-v", "2", "--cuda-device", cuda_device)
    say("test ", label, ": DensifyPointCloud started")
    t0 <- Sys.time()
    status <- suppressWarnings(system2(densify, args, stdout = out_txt, stderr = out_txt, wait = TRUE,
                                       timeout = gpu_timeout_min * 60))
    minutes <- round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 1)
-   Sys.sleep(3)
-   system("taskkill /IM nvidia-smi.exe /F", ignore.stdout = TRUE, ignore.stderr = TRUE)
-   Sys.sleep(3)
+   Sys.sleep(2)
+   writeLines("stop", stop_file); Sys.sleep(3); unlink(stop_file)
    g <- tryCatch(read.csv(gpu_log, header = FALSE, col.names = c("time", "util", "mem"), strip.white = TRUE),
                  error = function(e) data.frame(util = NA_real_, mem = NA_real_))
    ok <- file.exists(file.path(wdir, "scene_dense_test.mvs"))
@@ -90,14 +95,17 @@ run_densify_test <- function(label) {
    for (f in omvs_logs) file.copy(f, file.path(gpu_out_dir, paste0(label, "_", basename(f))), overwrite = TRUE)
    txt <- unlist(lapply(c(omvs_logs, out_txt), read_safe))
    cuda_lines <- unique(grep("cuda|gpu|device|error|fail", txt, ignore.case = TRUE, value = TRUE))
-   modules <- trimws(read_safe(mod_file)); modules <- modules[nzchar(modules)]
+   modules <- unique(trimws(read_safe(mod_file))); modules <- modules[nzchar(modules)]
+   apps <- unique(grep("Densify", read_safe(apps_log), value = TRUE, ignore.case = TRUE))
    res <- data.frame(test = label, exit_code = as.integer(status), finished = ok, minutes = minutes,
                      gpu_util_max = if (all(is.na(g$util))) NA else max(g$util, na.rm = TRUE),
                      gpu_mem_max_MB = if (all(is.na(g$mem))) NA else max(g$mem, na.rm = TRUE),
                      nvcuda_loaded = if (length(modules)) paste(modules, collapse = " ; ") else "not seen",
+                     densify_on_gpu = length(apps) > 0,
                      messages = paste(head(trimws(cuda_lines), 8), collapse = " | "))
    say("test ", label, ": exit code ", res$exit_code, ", ", minutes, " min, finished = ", ok, ", GPU max ",
-       res$gpu_util_max, " %, GPU memory max ", res$gpu_mem_max_MB, " MB, CUDA DLLs loaded: ", res$nvcuda_loaded)
+       res$gpu_util_max, " %, GPU memory max ", res$gpu_mem_max_MB, " MB, DensifyPointCloud listed by nvidia-smi: ",
+       res$densify_on_gpu, ", CUDA DLLs loaded: ", res$nvcuda_loaded)
    say("test ", label, ": last lines of OpenMVS: ", paste(tail(trimws(txt[nzchar(trimws(txt))]), 6), collapse = " | "))
    if (nzchar(res$messages)) say("test ", label, ": CUDA / error messages: ", res$messages)
    unlink(wdir, recursive = TRUE)                                   # the ODM project is left as it was
@@ -117,7 +125,15 @@ if (file.exists(dll_local) && file.exists(dll_sys) && file.size(dll_local) < 5e6
    if (!file.rename(dll_local, dummy_bak)) stop("Cannot rename ", dll_local, " (R must have the rights on C:/ODM)")
    resB <- tryCatch(run_densify_test("B_without_dummy_dll"), error = function(e) { say("test B failed: ", conditionMessage(e)); NULL })
    if (!is.null(resB)) gpu_results <- rbind(gpu_results, resB)
-   if (!is.null(resB) && resB$finished && isTRUE(resB$gpu_util_max >= 20)) {
+   # same run forced on the CPU (--cuda-device -2): reference time
+   resC <- tryCatch(run_densify_test("C_without_dummy_dll_CPU_only", cuda_device = "-2"),
+                    error = function(e) { say("test C failed: ", conditionMessage(e)); NULL })
+   if (!is.null(resC)) gpu_results <- rbind(gpu_results, resC)
+   gpu_used <- !is.null(resB) && resB$finished &&
+      (isTRUE(resB$densify_on_gpu) || isTRUE(resB$gpu_util_max >= 20) ||
+       (!is.null(resC) && resC$finished && resB$minutes < 0.6 * resC$minutes))
+   if (!is.null(resC)) say("time on GPU (B) ", resB$minutes, " min, on CPU only (C) ", resC$minutes, " min")
+   if (gpu_used) {
       gpu_fix_applied <- TRUE
       say("GPU used without the dummy DLL: renaming KEPT (", basename(dummy_bak), "), the next ODM runs use the GPU")
    } else {
@@ -130,4 +146,4 @@ if (file.exists(dll_local) && file.exists(dll_sys) && file.size(dll_local) < 5e6
    say("no dummy nvcuda.dll next to OpenMVS: hypothesis not confirmed, see the OpenMVS messages")
 }
 write.csv(gpu_results, file.path(gpu_out_dir, "gpu_test_summary.csv"), row.names = FALSE)
-print(gpu_results[, c("test", "exit_code", "finished", "minutes", "gpu_util_max", "gpu_mem_max_MB", "nvcuda_loaded")], row.names = FALSE)
+print(gpu_results[, c("test", "exit_code", "finished", "minutes", "gpu_util_max", "gpu_mem_max_MB", "densify_on_gpu")], row.names = FALSE)
