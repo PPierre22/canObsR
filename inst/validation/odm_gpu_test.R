@@ -132,7 +132,7 @@ if (file.exists(dll_local) && file.exists(dll_sys) && file.size(dll_local) < 5e6
    gpu_used <- !is.null(resB) && resB$finished &&
       (isTRUE(resB$densify_on_gpu) || isTRUE(resB$gpu_util_max >= 20) ||
        (!is.null(resC) && resC$finished && resB$minutes < 0.6 * resC$minutes))
-   if (!is.null(resC)) say("time on GPU (B) ", resB$minutes, " min, on CPU only (C) ", resC$minutes, " min")
+   if (!is.null(resB) && !is.null(resC)) say("time on GPU (B) ", resB$minutes, " min, on CPU only (C) ", resC$minutes, " min")
    if (gpu_used) {
       gpu_fix_applied <- TRUE
       say("GPU used without the dummy DLL: renaming KEPT (", basename(dummy_bak), "), the next ODM runs use the GPU")
