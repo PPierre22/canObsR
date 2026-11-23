@@ -28,8 +28,9 @@
 #'   (see also [check_odm_epochs()]);
 #' * the orthomosaics are written in the same format as with Metashape: 3 bands (RGB), white (255) background,
 #'   resolution `resol_ref`, coordinate system `crs`. ODM renders them in the UTM zone of the site: when `crs` is this
-#'   UTM zone, the pixels are kept as rendered (no resampling); otherwise they are reprojected (bilinear) on a grid
-#'   aligned on multiples of `resol_ref`.
+#'   UTM zone, the pixels are kept as rendered (no resampling; their size, computed by ODM, can differ from
+#'   `resol_ref` by a few 1e-5 m); otherwise they are reprojected (bilinear) on a grid aligned on multiples of
+#'   `resol_ref`.
 #' The ODM projects are written in `out_dir_project` (default: a `_odm_timesift_` folder inside `out_dir_ortho`, deleted at the end);
 #' this folder should be on the same disk as the images, which are then hard-linked instead of copied.
 #' If a run is interrupted, running the same call again resumes it (set `overwrite = TRUE` to start from scratch).
@@ -269,7 +270,13 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    r <- terra::rast(f)
    gdal <- c("COMPRESS=LZW", "BIGTIFF=IF_SAFER", "TILED=YES")
    out <- paste0(tools::file_path_sans_ext(f), "_canobs_tmp.tif")
-   resample <- !.same_crs(terra::crs(r), crs) || any(abs(terra::res(r) - res) > 1e-6 * res)
+   # ODM computes its pixel size from the extent and the number of pixels: it differs from res by a few 1e-5
+   # (e.g. 0.049998 x 0.049999 m for 0.05). Within 0.1 %, the pixels are kept as they are (relabelling them at
+   # exactly res would shift the far edge by several cm; resampling would smooth them).
+   resample <- !.same_crs(terra::crs(r), crs) || any(abs(terra::res(r) - res) > 1e-3 * res)
+   if (!resample && any(terra::res(r) != res))
+      message(basename(f), ": pixels of ODM kept, no resampling (pixel size ",
+              paste(signif(terra::res(r), 7), collapse = " x "), " m)")
    if (resample) {
       message("Reprojection of ", basename(f), " (ODM: ", .crs_label(terra::crs(r)), ", ",
               paste(signif(terra::res(r), 4), collapse = " x "), " m) to ", crs, ", ", res, " m (bilinear)")

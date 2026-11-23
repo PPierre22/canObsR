@@ -148,8 +148,9 @@ to build the orthomosaics (see \code{color_gains.csv} and \code{vignetting.csv} 
 (see also \code{\link[=check_odm_epochs]{check_odm_epochs()}});
 \item the orthomosaics are written in the same format as with Metashape: 3 bands (RGB), white (255) background,
 resolution \code{resol_ref}, coordinate system \code{crs}. ODM renders them in the UTM zone of the site: when \code{crs} is this
-UTM zone, the pixels are kept as rendered (no resampling); otherwise they are reprojected (bilinear) on a grid
-aligned on multiples of \code{resol_ref}.
+UTM zone, the pixels are kept as rendered (no resampling; their size, computed by ODM, can differ from
+\code{resol_ref} by a few 1e-5 m); otherwise they are reprojected (bilinear) on a grid aligned on multiples of
+\code{resol_ref}.
 The ODM projects are written in \code{out_dir_project} (default: a \verb{_odm_timesift_} folder inside \code{out_dir_ortho}, deleted at the end);
 this folder should be on the same disk as the images, which are then hard-linked instead of copied.
 If a run is interrupted, running the same call again resumes it (set \code{overwrite = TRUE} to start from scratch).
