@@ -200,7 +200,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    Sys.setenv(TMPDIR = tmp_sub, TMP = tmp_sub, TEMP = tmp_sub, CPL_TMPDIR = tmp_sub)
    on.exit({
       terra::tmpFiles(current = TRUE, orphan = FALSE, old = FALSE, remove = TRUE)
-      terra::terraOptions(tempdir = old_terra)
+      # the previous folder may have been deleted meanwhile: never leave terra on tmp_sub, deleted below
+      terra::terraOptions(tempdir = if (dir.exists(old_terra)) old_terra else tempdir())
       for (v in names(old_env)) if (is.na(old_env[[v]])) Sys.unsetenv(v) else do.call(Sys.setenv, as.list(old_env[v]))
       unlink(tmp_sub, recursive = TRUE)
    }, add = TRUE)

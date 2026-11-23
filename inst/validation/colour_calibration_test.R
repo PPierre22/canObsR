@@ -20,8 +20,8 @@ my_path   <- "D:/canObsR/data/canObsR_data/canObsR_data"
 path_in   <- file.path(my_path, "1_my_drone_data")
 bench_dir <- file.path(my_path, "benchmark3")
 odm_path  <- "C:/ODM/run.bat"
-run_odm_date       <- TRUE
-run_metashape_date <- TRUE
+if (!exists("run_odm_date"))       run_odm_date       <- TRUE   # FALSE: series already computed, statistics only
+if (!exists("run_metashape_date")) run_metashape_date <- TRUE
 common <- list(path_in = path_in, resol_ref = 0.05, site_name = "Bouamir", crs = "EPSG::32633", calibrate_col = TRUE)
 
 series <- c(Metashape_chunk = file.path(bench_dir, "ortho_metashape"),
@@ -30,8 +30,8 @@ series <- c(Metashape_chunk = file.path(bench_dir, "ortho_metashape"),
             ODM_date        = file.path(bench_dir, "ortho_odm_date"))
 dir_out <- file.path(bench_dir, "compare_colour")
 dir.create(dir_out, recursive = TRUE, showWarnings = FALSE)
-terraOptions(tempdir = file.path(bench_dir, "tmp_colour"))
 dir.create(file.path(bench_dir, "tmp_colour"), showWarnings = FALSE)
+terraOptions(tempdir = file.path(bench_dir, "tmp_colour"))
 
 times <- list()
 if (run_odm_date) {
@@ -47,6 +47,7 @@ if (run_metashape_date) {
    times$Metashape_date <- t[["elapsed"]] / 60
 }
 if (length(times)) print(data.frame(run = names(times), minutes = round(unlist(times), 1)), row.names = FALSE)
+terraOptions(tempdir = file.path(bench_dir, "tmp_colour"))    # generate_Mosa() may have changed it
 
 # ---- colour statistics on the common area --------------------------------------------------------
 files <- lapply(series, function(d) {

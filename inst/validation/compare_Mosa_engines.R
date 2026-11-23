@@ -36,6 +36,7 @@ default("CPUs",      NULL)                                        # NULL = all
 if (!py_available()) use_condaenv(conda_env, required = TRUE)
 dir.create(dir_out, showWarnings = FALSE, recursive = TRUE)
 dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
+old_terra_tmp <- terraOptions(print = FALSE)$tempdir
 terraOptions(tempdir = tmp_dir)
 cmp <- new.env()
 source_python(py_file, envir = cmp)
@@ -126,4 +127,5 @@ writeLines(out, file.path(dir_out, "summary.txt"))
 cat(out, sep = "\n")
 
 tmpFiles(current = TRUE, orphan = FALSE, old = FALSE, remove = TRUE)
+terraOptions(tempdir = if (dir.exists(old_terra_tmp)) old_terra_tmp else tempdir())   # before deleting tmp_dir
 unlink(tmp_dir, recursive = TRUE)
