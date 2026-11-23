@@ -66,9 +66,11 @@ def _n_cpus(CPUs=None):
     """
     Number of processes for AROSICS. On Windows, a multiprocessing pool cannot wait on more than 63 handles (about 61
     processes): with more (e.g. 64 threads), its internal thread fails ("need at most 63 handles") and the pool
-    hangs without an error in R. The number is therefore capped at 60 on Windows.
+    hangs without an error in R. The number is therefore capped at 60 on Windows (16 by default).
     """
-    n = (os.cpu_count() or 1) if CPUs is None else int(CPUs)
+    # default: 16 processes. On Windows each AROSICS process receives its own copy of the images (no fork):
+    # with 60 processes and orthomosaics of ~15000 x 14000 px, the memory is exhausted and the run seems frozen.
+    n = min(os.cpu_count() or 1, 16) if CPUs is None else int(CPUs)
     if sys.platform.startswith('win'):
         n = min(n, 60)
     return max(1, n)
