@@ -1,0 +1,12 @@
+# Python environment of canObsR / canobspy (created by canObsR::canobs_setup()).
+# Short list on purpose: conda-forge resolves the dependencies for each system (Windows, macOS, Linux).
+name: canobs
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pillow
+  - gdal
+  - arosics
+  - pip

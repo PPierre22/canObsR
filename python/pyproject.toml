@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "canobspy"
+dynamic = ["version"]
+description = "Time-SIFT drone orthomosaics (OpenDroneMap or Metashape) and their co-registration (AROSICS) for the canobs observatories"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "GPL-3.0-or-later"}
+# GDAL and AROSICS are installed with conda (conda-forge): pip wheels of GDAL are not reliable on Windows.
+dependencies = ["numpy", "pillow"]
+
+[project.optional-dependencies]
+align = ["arosics"]
+
+[project.urls]
+Homepage = "https://github.com/umr-amap/canObsR"
+
+[tool.setuptools]
+packages = ["canobspy"]
+
+[tool.setuptools.dynamic]
+version = {attr = "canobspy.__version__"}
