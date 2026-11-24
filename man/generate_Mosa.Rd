@@ -29,7 +29,7 @@ generate_Mosa(
   overwrite = FALSE,
   check_dates = TRUE,
   tempdir_custom = getOption("canObsR.tempdir", NULL),
-  keypoint_limit = 100000L,
+  keypoint_limit = NULL,
   tiepoint_limit = 10000L,
   calibrate_vignetting = TRUE,
   odm_gpu_fix = TRUE
@@ -106,10 +106,12 @@ Default: the option \code{canObsR.tempdir} if set (\code{options(canObsR.tempdir
 orthomosaics: this folder should be on a disk with free space (not the system disk). A subfolder is created in it
 and deleted at the end.}
 
-\item{keypoint_limit}{integer. Maximum number of keypoints detected per image for the alignment (Metashape
-\code{keypoint_limit}; ODM \code{--min-num-features}, the number of features extracted per image). Default 100000, the value
-of the Metashape pipeline. A smaller value makes the ODM alignment much faster (ODM default: 10000), with fewer tie
-points between dates. With Metashape, the photos that are not aligned are matched again with twice this limit.}
+\item{keypoint_limit}{integer. Number of keypoints detected per image for the alignment (Metashape \code{keypoint_limit};
+ODM \code{--min-num-features}, the number of features extracted per image). \code{NULL} (default): 100000 for Metashape
+(its pipeline) and 10000 for ODM. Tests on the canObsR data (3 dates): the co-registration between dates is the
+same with 10000, 20000 or 100000 keypoints (2.2-2.3 cm), but ODM agrees locally with Metashape only with 100000
+(10 cm against about 38 cm), at the cost of an alignment 23 times longer (16 h instead of 41 min).
+With Metashape, the photos that are not aligned are matched again with twice this limit.}
 
 \item{tiepoint_limit}{integer. Only for \code{engine = "metashape"}: maximum number of tie points kept per image (Metashape
 \code{tiepoint_limit}, default 10000; doubled for the photos matched again). ODM has no equivalent.}

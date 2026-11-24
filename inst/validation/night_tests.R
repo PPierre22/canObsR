@@ -3,13 +3,13 @@
 # =====================================================================================================
 # Questions:
 #   1. how many keypoints per image for ODM? 100 000 (= Metashape) took 16 h of alignment in benchmark3;
-#      tested here: 20 000 and 10 000, with all the other settings of canObsR 0.0.0.9013 and the GPU;
+#      tested here: 20 000 and 10 000, with all the other settings of canObsR 0.0.0.9014 and the GPU;
 #   2. does a denser mesh (--mesh-size) bring the ODM orthomosaics closer to Metashape? (ODM default 200 000
 #      vertices; tested 1 000 000 and 4 000 000, from the meshing step only).
 # Reference: the Metashape series of benchmark3 (canObsR 0.0.0.9012, same Metashape settings as before).
 # Each ODM series is compared with it (AROSICS, sections A for ODM, B ODM vs Metashape, C colours).
 #
-# To run in a NEW R session, with canObsR_0.0.0.9013_odm.tar.gz, night_tests.R, compare_Mosa_engines.R,
+# To run in a NEW R session, with canObsR_0.0.0.9014_odm.tar.gz, night_tests.R, compare_Mosa_engines.R,
 # compare_engines.py and colour_calibration_test.R in D:/canObsR:
 #   source("D:/canObsR/night_tests.R")
 # Every step is independent (an error is logged, the next step starts). A step is skipped when its expected
@@ -38,9 +38,9 @@ log_line <- function(...) { m <- paste0(format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
 
 # ---- 0. package, GPU, disk -------------------------------------------------------------------------
 v <- tryCatch(as.character(packageVersion("canObsR", lib.loc = lib_dev)), error = function(e) "none")
-if (v != "0.0.0.9013") {
+if (v != "0.0.0.9014") {
    if ("canObsR" %in% loadedNamespaces()) stop("canObsR ", v, " is loaded: restart R and run this script again")
-   install.packages(file.path(scripts, "canObsR_0.0.0.9013_odm.tar.gz"), repos = NULL, type = "source", lib = lib_dev)
+   install.packages(file.path(scripts, "canObsR_0.0.0.9014_odm.tar.gz"), repos = NULL, type = "source", lib = lib_dev)
 }
 library(canObsR, lib.loc = lib_dev); library(reticulate); library(terra)
 use_condaenv("C:/ProgramData/miniconda3/envs/arosics", required = TRUE)

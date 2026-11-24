@@ -64,7 +64,7 @@ DENSE_OPTIONS = {'--pc-quality': (1, 'openmvs'), '--pc-skip-geometric': (0, 'ope
                  '--build-overviews': (0, 'mvs_texturing'), '--cog': (0, 'mvs_texturing')}
 # Settings of the Metashape pipeline of canObsR, reproduced with ODM (see the documentation of the engines):
 GPS_ACCURACY = 10               # m, Metashape default accuracy of the camera positions (Reference settings)
-KEYPOINT_LIMIT = 100000         # keypoints per image, Metashape matchPhotos(keypoint_limit) of canObsR
+KEYPOINT_LIMIT = 10000          # keypoints per image (Metashape pipeline: 100000; see ENGINES.md, tests of 24/11/2026)
 TIMINGS_FILE = 'timings.csv'
 TMP_NAME = '_tmp'               # default folder of the temporary files, created by generate_Mosa() in out_dir_project
 COLOR_FILE = 'color_gains.csv'
