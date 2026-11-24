@@ -26,6 +26,10 @@ b3       <- file.path(my_path, "benchmark3")
 b4       <- file.path(my_path, "benchmark4")
 odm_path <- "C:/ODM/run.bat"
 stop_by  <- as.POSIXct(paste(Sys.Date() + 1, "07:45:00"))          # tomorrow 07:45
+# steps to run (set before source() to run only some of them, e.g. night_steps <- "mesh")
+if (!exists("night_steps")) night_steps <- c("colour", "k20000", "k10000", "mesh")
+if (!exists("mesh_on"))     mesh_on     <- "k10000"                 # project used for the mesh test
+if (!exists("mesh_sizes"))  mesh_sizes  <- c(1000000, 4000000)
 dir.create(b4, showWarnings = FALSE, recursive = TRUE)
 night_log <- file.path(b4, "night_log.txt")
 
@@ -131,22 +135,24 @@ update_summary <- function() {
 }
 
 # ---- 1. colour statistics of benchmark3 (series already computed) -----------------------------------
-tryCatch({ run_odm_date <- FALSE; run_metashape_date <- FALSE
+if ("colour" %in% night_steps) tryCatch({ run_odm_date <- FALSE; run_metashape_date <- FALSE
            source(file.path(scripts, "colour_calibration_test.R")); log_line("END   colour statistics (benchmark3)") },
          error = function(e) log_line("ERROR in the colour statistics: ", conditionMessage(e)))
 
 # ---- 2. ODM 20 000 keypoints (full run: alignment ~1.5-2 h, dense on GPU, comparison) ---------------
-step("k20000", 4.5, list(keypoint_limit = 20000L), file.path(b4, "project_odm_k20000"))
+if ("k20000" %in% night_steps) step("k20000", 4.5, list(keypoint_limit = 20000L), file.path(b4, "project_odm_k20000"))
 
 # ---- 3. ODM 10 000 keypoints (full run: alignment ~45 min) -----------------------------------------
-step("k10000", 3.5, list(keypoint_limit = 10000L), file.path(b4, "project_odm_k10000"))
+if ("k10000" %in% night_steps) step("k10000", 3.5, list(keypoint_limit = 10000L), file.path(b4, "project_odm_k10000"))
 
-# ---- 4. mesh density, on the 20 000 keypoints project (meshing, texture and orthomosaic only) -------
-for (m in c(1000000, 4000000)) {
-   if (dir.exists(file.path(b4, "project_odm_k20000", "20220427")))
-      step(paste0("k20000_mesh", format(m, scientific = FALSE)), 2,
-           list(keypoint_limit = 20000L, odm_args = c("--mesh-size", format(m, scientific = FALSE))),
-           file.path(b4, "project_odm_k20000"))
+# ---- 4. mesh density, on an existing project (meshing, texture and orthomosaic only) ----------------
+kp <- as.integer(sub("^k", "", mesh_on))
+if ("mesh" %in% night_steps) for (m in mesh_sizes) {
+   if (dir.exists(file.path(b4, paste0("project_odm_", mesh_on), "20220427")))
+      step(paste0(mesh_on, "_mesh", format(m, scientific = FALSE)), 2.5,
+           list(keypoint_limit = kp, odm_args = c("--mesh-size", format(m, scientific = FALSE))),
+           file.path(b4, paste0("project_odm_", mesh_on)))
+   else log_line("SKIPPED mesh test: no project ", mesh_on)
 }
 
 log_line("end of the night. Summary: ", file.path(b4, "night_summary.txt"))
