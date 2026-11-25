@@ -192,9 +192,8 @@
 #' @param odm_path character. Path of ODM (`run.bat` of the Windows installer of ODM, `run.sh` of a native Linux
 #'   installation). Default: option `canObsR.odm_path`, environment variable `ODM_PATH`, `C:/ODM/run.bat`. ODM is
 #'   only needed by [generate_Mosa()] with `engine = "odm"`.
-#' @param metashape_wheel character. Path of the Metashape Python module (`Metashape-*.whl`, downloaded from
-#'   https://www.agisoft.com/downloads/installer/) to install in the environment. Only needed by [generate_Mosa()]
-#'   with `engine = "metashape"` (Metashape Professional licence).
+#' @param metashape_wheel character. Path of a Metashape Python module (`.whl`) to install in the environment
+#'   (see [canobs_install_metashape()], which downloads it). Only needed by `generate_Mosa(engine = "metashape")`.
 #' @param reinstall logical. Removes and recreates the Python environment.
 #' @param ask logical. Asks before installing Miniforge (default: in interactive sessions).
 #'
@@ -351,9 +350,7 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
       odm <- tryCatch(.install_odm("C:/ODM", .odm_tested), error = function(e) { .say("ko", conditionMessage(e)); NULL })
    }
    gpu <- if (is.null(odm)) .odm_missing_message() else .odm_report(odm, py, envdir)
-   if (!is.null(v$metashape)) .say("ok", "Metashape module ", v$metashape, " (the licence is checked when it is used)")
-   else .say("no", "Metashape module not installed: needed by generate_Mosa(engine = \"metashape\") only ",
-             "(canobs_setup(metashape_wheel = \"<path>/Metashape-...whl\"))")
+   .metashape_report(v)
 
    # 6. configuration ------------------------------------------------------------------------------------
    .say("step", "6/6 configuration")
@@ -372,8 +369,8 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    } else if (identical(gpu$status, "dummy_present")) {
       todo <- c(todo, paste0("ODM will not use the GPU: rename ", gpu$path, " to nvcuda.dll.odm_dummy (as administrator)"))
    }
-   if (is.null(v$metashape)) todo <- c(todo, paste0("optional, only for engine = \"metashape\": ",
-                                                    "canObsR::canobs_setup(metashape_wheel = \"<path>/Metashape-...whl\")"))
+   if (is.null(v$metashape)) todo <- c(todo, "optional, only for engine = \"metashape\":   canObsR::canobs_install_metashape()")
+   else if (!isTRUE(v$metashape_activated)) todo <- c(todo, "Metashape is not activated on this computer: activate its licence in the Metashape Professional application")
    bar <- strrep("-", 100)
    message("\n", bar)
    message(" canObsR: Python environment ready in ", round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 1), " min.")
@@ -385,6 +382,84 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    message(bar)
    if (!is.null(log)) cat(" Still to do:", todo, sep = "\n", file = log, append = TRUE)
    invisible(cfg)
+}
+
+# ---- Metashape ----------------------------------------------------------------------------------------
+# Python module of Metashape (standalone, needs a Metashape Professional 2.x licence activated on the computer).
+# From 2.3, the wheels support Python 3.9-3.13; up to 2.2, Python <= 3.11 only on Windows (not the 3.12 of canObsR).
+.metashape_tested <- "2.3.2"
+
+.metashape_wheel_url <- function(version) {
+   if (numeric_version(version) < "2.3")
+      stop("Metashape modules before 2.3 do not support Python 3.12 (environment of canObsR) on Windows: use ",
+           "version >= 2.3 (a Metashape 2.x licence works with all 2.x versions).", call. = FALSE)
+   tags <- "cp39.cp310.cp311.cp312.cp313"
+   plat <- switch(Sys.info()[["sysname"]],
+      Windows = "none-win_amd64", Darwin = "abi3-macosx_11_0_universal2.macosx_10_13_x86_64", "abi3-linux_x86_64")
+   sprintf("https://download.agisoft.com/metashape-%s-%s-%s.whl", version, tags, plat)
+}
+
+.metashape_report <- function(v) {
+   if (is.null(v$metashape)) {
+      .say("no", "Metashape module not installed: only needed by generate_Mosa(engine = \"metashape\") ",
+           "(canObsR::canobs_install_metashape())")
+   } else if (isTRUE(v$metashape_activated)) {
+      .say("ok", "Metashape module ", v$metashape, ", licence activated")
+   } else {
+      .say("ko", "Metashape module ", v$metashape, " installed, but no activated licence: activate Metashape Professional ",
+           "(2.x licence) on this computer, in the application (Help > Activate product)")
+   }
+}
+
+#' Install the Python module of Agisoft Metashape
+#'
+#' @description
+#' Only needed by `generate_Mosa(engine = "metashape")`. Downloads the Python module of Metashape (a `.whl` file of
+#' <https://www.agisoft.com/downloads/installer/>), installs it in the Python environment of canObsR and checks
+#' that a licence is activated. The module needs a **Metashape Professional 2.x licence activated on the computer**
+#' (in the Metashape application: *Help > Activate product*); a 2.x licence works with every 2.x version, so the
+#' module can be more recent than the installed application.
+#'
+#' Modules before 2.3 do not support the Python 3.12 of canObsR on Windows.
+#'
+#' @param version character. Version of the module. Default: the version tested with canObsR.
+#' @param wheel character. Instead of `version`: path or URL of a `.whl` file already downloaded.
+#' @return Invisibly, the version of the installed module.
+#' @export
+#' @examples
+#' \dontrun{
+#' canObsR::canobs_install_metashape()
+#' canObsR::canobs_install_metashape(wheel = "D:/downloads/metashape-2.3.2-cp39.cp310.cp311.cp312.cp313-none-win_amd64.whl")
+#' }
+canobs_install_metashape <- function(version = .metashape_tested, wheel = NULL) {
+   cfg <- canobs_config()
+   if (is.null(cfg)) stop("Run canObsR::canobs_setup() first.", call. = FALSE)
+   old <- options(canObsR.setup_log = cfg$log); on.exit(options(old), add = TRUE)
+   if (is.null(wheel)) wheel <- .metashape_wheel_url(version)
+   if (grepl("^https?://", wheel)) {
+      dest <- file.path(tempdir(), basename(wheel))
+      .say("info", "download of ", wheel, " (~150 MB)...")
+      o2 <- options(timeout = max(3600, getOption("timeout"))); on.exit(options(o2), add = TRUE)
+      ok <- tryCatch(utils::download.file(wheel, dest, mode = "wb", quiet = TRUE) == 0, error = function(e) FALSE)
+      if (!ok || file.size(dest) < 1e7)
+         stop("Download failed. Download the Python 3 module by hand from https://www.agisoft.com/downloads/installer/ ",
+              "then: canobs_install_metashape(wheel = \"<path of the .whl file>\")", call. = FALSE)
+      wheel <- dest
+   }
+   if (!file.exists(wheel)) stop("File not found: ", wheel, call. = FALSE)
+   .say("info", "installation of ", basename(wheel), " in the environment ", cfg$envname)
+   r <- .run(cfg$python, c("-m", "pip", "install", "--upgrade", "--disable-pip-version-check", "--no-input",
+                           normalizePath(wheel, winslash = "/")), env = .env_vars(cfg$envdir), echo = FALSE)
+   if (r$status != 0) {
+      .say("ko", "pip could not install ", basename(wheel), ": ", utils::tail(strsplit(r$stderr, "\n")[[1]], 1))
+      stop("Installation of the Metashape module failed (see the log: ", cfg$log, ").", call. = FALSE)
+   }
+   r <- .canobs_python(c("-m", "canobspy", "info"), echo = FALSE)
+   v <- tryCatch(jsonlite::fromJSON(utils::tail(strsplit(r$stdout, "\n")[[1]], 1)), error = function(e) list())
+   .metashape_report(v)
+   cfg$versions <- v
+   saveRDS(cfg, .canobs_config_file())
+   invisible(v$metashape)
 }
 
 # ---- ODM ----------------------------------------------------------------------------------------------
@@ -515,7 +590,8 @@ canobs_sitrep <- function() {
       v <- tryCatch(jsonlite::fromJSON(utils::tail(strsplit(r$stdout, "\n")[[1]], 1)), error = function(e) NULL)
       if (is.null(v)) .say("ko", "canobspy cannot be imported: run canobs_setup()") else {
          .say("ok", "canobspy ", v$canobspy, ", Python ", v$python, ", GDAL ", v$gdal, ", AROSICS ", v$arosics,
-              if (!is.null(v$metashape)) paste0(", Metashape ", v$metashape))
+              if (!is.null(v$metashape)) paste0(", Metashape ", v$metashape,
+                                                if (isTRUE(v$metashape_activated)) " (licence activated)" else " (NO ACTIVATED LICENCE)"))
          if (!identical(v$canobspy, as.character(utils::packageVersion("canObsR"))))
             .say("ko", "canobspy ", v$canobspy, " differs from canObsR ", as.character(utils::packageVersion("canObsR")),
                  ": run canobs_setup() to update it")

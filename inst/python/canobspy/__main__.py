@@ -26,6 +26,8 @@ def _versions():
         try:
             m = importlib.import_module(mod)
             out[name] = m.app.version if name == "metashape" else getattr(m, attr)
+            if name == "metashape":
+                out["metashape_activated"] = bool(getattr(m.app, "activated", False))
         except Exception as e:  # noqa: BLE001 - reported, not raised
             out[name] = None
             out[name + "_error"] = f"{type(e).__name__}: {e}"

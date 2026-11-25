@@ -30,9 +30,8 @@ executable (\code{.../Scripts/conda.exe} on Windows, \code{.../bin/conda} elsewh
 installation). Default: option \code{canObsR.odm_path}, environment variable \code{ODM_PATH}, \verb{C:/ODM/run.bat}. ODM is
 only needed by \code{\link[=generate_Mosa]{generate_Mosa()}} with \code{engine = "odm"}.}
 
-\item{metashape_wheel}{character. Path of the Metashape Python module (\verb{Metashape-*.whl}, downloaded from
-https://www.agisoft.com/downloads/installer/) to install in the environment. Only needed by \code{\link[=generate_Mosa]{generate_Mosa()}}
-with \code{engine = "metashape"} (Metashape Professional licence).}
+\item{metashape_wheel}{character. Path of a Metashape Python module (\code{.whl}) to install in the environment
+(see \code{\link[=canobs_install_metashape]{canobs_install_metashape()}}, which downloads it). Only needed by \code{generate_Mosa(engine = "metashape")}.}
 
 \item{reinstall}{logical. Removes and recreates the Python environment.}
 

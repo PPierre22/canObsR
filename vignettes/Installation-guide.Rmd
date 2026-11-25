@@ -29,7 +29,7 @@ packages `terra` and `sf`, nor with other Python installations of your computer.
 | conda (Miniforge if you have none) | the Python environment | `canobs_setup()` |
 | environment `canobs`: Python 3.12, GDAL, AROSICS, canobspy | everything | `canobs_setup()` |
 | [OpenDroneMap](https://opendronemap.org) (ODM) | `generate_Mosa(engine = "odm")`, the default | you (installer), detected by `canobs_setup()` |
-| Agisoft Metashape Professional + licence | `generate_Mosa(engine = "metashape")` | you, optional |
+| Agisoft Metashape Professional (2.x licence) | `generate_Mosa(engine = "metashape")` | you (application), `canobs_install_metashape()` (Python module), optional |
 | NVIDIA GPU | ODM 3 to 4 times faster | optional |
 
 Disk space: about 3 GB for the conda environment (plus ~0.5 GB for Miniforge if it is installed), 6 GB for ODM.
@@ -99,7 +99,7 @@ ODM (default photogrammetry engine of canObsR) is not installed. Install ODM 3.6
 [OK] ODM installed in C:/ODM
 [OK] ODM 3.6.2: C:/ODM/run.bat
 [OK] NVIDIA GPU: ODM's dummy nvcuda.dll renamed, dense matching will use the GPU
-[--] Metashape module not installed: needed by generate_Mosa(engine = "metashape") only (...)
+[--] Metashape module not installed: only needed by generate_Mosa(engine = "metashape") (canObsR::canobs_install_metashape())
 
 ==> 6/6 configuration
 [OK] saved in C:/Users/me/AppData/Roaming/R/config/R/canObsR/config.rds
@@ -107,7 +107,7 @@ ODM (default photogrammetry engine of canObsR) is not installed. Install ODM 3.6
 ----------------------------------------------------------------------------------------------------
  canObsR: Python environment ready in 16.2 min.
  Still to do:
-   1. optional, only for engine = "metashape": canObsR::canobs_setup(metashape_wheel = "<path>/Metashape-...whl")
+   1. optional, only for engine = "metashape":   canObsR::canobs_install_metashape()
  Diagnosis at any time: canObsR::canobs_sitrep()     Log: C:/Users/me/AppData/Roaming/R/config/R/canObsR/setup_...log
 ----------------------------------------------------------------------------------------------------
 ```
@@ -148,13 +148,19 @@ that cannot be missed: rename it yourself, once, as administrator. Without an NV
 
 ## 5. Metashape (optional)
 
-To use `generate_Mosa(engine = "metashape")`: install Metashape Professional and activate its licence, download
-the **Python 3 module** for your system from <https://www.agisoft.com/downloads/installer/> (a `Metashape-*.whl`
-file), and install it in the environment:
+To use `generate_Mosa(engine = "metashape")`, you need Metashape Professional with a **2.x licence activated on
+the computer** (in the application: *Help > Activate product*), and its Python module in the environment of
+canObsR:
 
 ```{r}
-canObsR::canobs_setup(metashape_wheel = "C:/Users/me/Downloads/Metashape-2.2.1-cp37.cp38.cp39.cp310.cp311-none-win_amd64.whl")
+canObsR::canobs_install_metashape()
 ```
+
+It downloads the Python module of Metashape (2.3.2 by default, ~150 MB), installs it and checks that the licence
+is activated. A 2.x licence works with every 2.x version: the module can be more recent than the application.
+Modules before 2.3 cannot be used on Windows (they do not support the Python 3.12 of canObsR). Without internet
+access to agisoft.com: download the *Python 3 Module* from <https://www.agisoft.com/downloads/installer/>, then
+`canobs_install_metashape(wheel = "<path of the .whl file>")`.
 
 ## 6. Check the installation
 
