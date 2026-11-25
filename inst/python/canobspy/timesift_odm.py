@@ -654,6 +654,28 @@ def _watch_depthmaps(project_dir, stop, every=60, gpu_base=None):
             log('!' * 100)
 
 
+PROGRESS_RE = re.compile(r'^\s*(.*?)\s*(\d{1,3})%\.\.\.')
+QUIET_RE = re.compile(r'^\s*(Block \[\(|Rendering material|Loading odm_textured|Found material)')
+
+
+def _show(line, shown):
+    """
+    Lines of ODM shown in the console (all of them are in the log file): no empty lines; the progress lines of a
+    step ('Blending texture patches 34%...', thousands of them) only at 0, 25, 50, 75 and 100 %; no list of blocks.
+    """
+    if not line.strip() or QUIET_RE.search(line):
+        return False
+    m = PROGRESS_RE.search(line)
+    if not m:
+        return True
+    label, pct = m.group(1), int(m.group(2))
+    step = pct // 25
+    if shown.get(label) == step:
+        return False
+    shown[label] = step
+    return True
+
+
 LAST_RUN = {'densify_failed': False, 'gpu_idle': None}     # set by run_odm(): the dense matching (OpenMVS) failed in the last run
 
 
@@ -668,7 +690,7 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
     if tmp_dir:                                # temporary files of ODM and of the tools it runs (GDAL, PDAL...)
         os.makedirs(tmp_dir, exist_ok=True)
         env.update(TMP=tmp_dir, TEMP=tmp_dir, TMPDIR=tmp_dir, CPL_TMPDIR=tmp_dir)
-    started, gpu_lines = {}, []
+    started, gpu_lines, shown = {}, [], {}
     LAST_RUN['densify_failed'] = False
     timings = os.path.join(datasets_dir, TIMINGS_FILE)
     new_file = not os.path.isfile(timings)
@@ -687,7 +709,8 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
         watcher.start()
         for line in proc.stdout:
             logfile.write(line)
-            print(line, end='', flush=True)
+            if _show(line, shown):
+                print(line, end='', flush=True)
             m = STAGE_RE.search(line)
             if m:
                 if m.group(1) == 'Running':
