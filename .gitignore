@@ -21,3 +21,7 @@ installation_and_funcs.nb.html
 /doc/
 /Meta/
 __pycache__/
+!inst/ENGINES.md
+!python/README.md
+!README.md
+!NEWS.md
