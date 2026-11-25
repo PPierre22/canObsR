@@ -148,6 +148,30 @@ so ODM silently computes on the processor (3 to 4 times slower). `canobs_setup()
 it and rename it `nvcuda.dll.odm_dummy`; if they cannot (no write access to the ODM folder), they print a warning
 that cannot be missed: rename it yourself, once, as administrator. Without an NVIDIA GPU, nothing to do.
 
+### Is the GPU really used?
+
+`canobs_setup()` checks that nothing hides the NVIDIA driver, but only a real computation shows whether ODM uses the
+GPU. During `generate_mosaics()`, canobsR watches the GPU while the depth maps are computed and prints a warning
+that cannot be missed if it stays idle (`ODM IS NOT USING THE NVIDIA GPU`); the processing goes on, on the processor
+(3 to 10 times slower). Then, ODM stopped:
+
+```{r}
+canobsR::canobs_check_odm_gpu("D:/bouamir/2_mosaics/projects")
+```
+
+runs the dense matching for a few minutes with all its messages and says whether the GPU is used, and why not.
+Frequent causes, seen on our computers:
+
+* **laptop in power saving mode, or on battery**: the GPU is limited to a few watts (shown by
+  `canobs_check_odm_gpu()`). Plug it in, and choose *Settings > System > Power > Best performance*, and the
+  performance profile of the maker's software if there is one;
+* **ODM's dummy `nvcuda.dll`** (Windows installer of ODM): renamed by `canobs_setup()` / `canobs_install_odm()`;
+* **not enough GPU memory** for the depth maps (laptop GPUs of 4-8 GB): ODM then fails, and canobsR processes the
+  date again on the processor automatically; `downscale_factor_depth_map = 4` needs 4 times less memory.
+
+The Windows Task Manager does not show CUDA computations when "hardware-accelerated GPU scheduling" is on: use
+`nvidia-smi` in a terminal (memory used and `GPU-Util`), or `canobs_check_odm_gpu()`.
+
 ## 5. Metashape (optional)
 
 To use `generate_Mosa(engine = "metashape")`, you need Metashape Professional with a **2.x licence activated on

@@ -547,11 +547,77 @@ def check_odm_gpu(odm_path, fix=True):
     return {'status': 'dummy_present', 'path': dummy}
 
 
-def _watch_depthmaps(project_dir, stop, every=60):
-    """Prints the number of depth maps computed by OpenMVS (one file per image) when it changes."""
+def probe_openmvs_gpu(odm_path, scene, seconds=240, out_dir=None):
+    """
+    Runs the dense matching of OpenMVS (the program of ODM that uses the GPU) for a few minutes on an existing scene
+    (scene.mvs of an ODM project), at low resolution, with its messages, while the NVIDIA GPU is watched. Says whether
+    OpenMVS finds and uses the GPU, and why not. Nothing of the project is modified (outputs in a temporary folder).
+    """
+    import tempfile
+    from .resources import nvidia_status
+    root = os.path.dirname(os.path.abspath(odm_path))
+    exe = os.path.join(root, 'SuperBuild', 'install', 'bin', 'DensifyPointCloud' + ('.exe' if sys.platform == 'win32' else ''))
+    if not os.path.isfile(exe):
+        raise FileNotFoundError(f'OpenMVS not found: {exe}')
+    tmp = out_dir or tempfile.mkdtemp(prefix='canobs_gpu_probe_')
+    os.makedirs(tmp, exist_ok=True)
+    cmd = [exe, os.path.abspath(scene), '-o', os.path.join(tmp, 'probe_dense.mvs'), '-w', tmp,
+           '--resolution-level', '2', '--max-resolution', '5472', '--min-resolution', '640', '--max-threads', '4',
+           '--number-views-fuse', '2', '--archive-type', '3', '--cuda-device', '-1', '-v', '3']
+    log('Running: ' + ' '.join(cmd))
+    g0 = nvidia_status()
+    base = (g0[0]['mem_used_mb'] or 0) if g0 else 0
+    env = dict(os.environ)
+    env['PATH'] = os.path.dirname(exe) + os.pathsep + env.get('PATH', '')
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                            text=True, encoding='utf-8', errors='replace', cwd=tmp, env=env)
+    lines, peak, t0 = [], {'mem': 0.0, 'util': 0.0}, time.time()
+    stop = threading.Event()
+
+    def watch():
+        while not stop.wait(5):
+            g = nvidia_status()
+            if g:
+                peak['mem'] = max(peak['mem'], (g[0]['mem_used_mb'] or 0) - base)
+                peak['util'] = max(peak['util'], g[0]['util'] or 0)
+    th = threading.Thread(target=watch, daemon=True)
+    th.start()
+
+    def reader():
+        for line in proc.stdout:
+            lines.append(line.rstrip())
+            print(line, end='', flush=True)
+    rt = threading.Thread(target=reader, daemon=True)
+    rt.start()
+    while proc.poll() is None and time.time() - t0 < seconds:
+        time.sleep(2)
+    if proc.poll() is None:
+        proc.kill()
+        try:
+            proc.wait(15)
+        except subprocess.TimeoutExpired:
+            pass
+    rt.join(5)
+    stop.set()
+    key = [x for x in lines if re.search(r'cuda|gpu|device|nvidia', x, re.I)]
+    used = peak['mem'] > 200 or peak['util'] > 10
+    res = {'gpus': g0, 'gpu_used': used, 'gpu_mem_mb': round(peak['mem']), 'gpu_util': peak['util'],
+           'cuda_lines': key[:20], 'last_lines': lines[-15:], 'exit_code': proc.returncode,
+           'seconds': round(time.time() - t0)}
+    shutil.rmtree(tmp, ignore_errors=True)
+    return res
+
+
+def _watch_depthmaps(project_dir, stop, every=60, gpu_base=None):
+    """
+    While ODM runs: prints the number of depth maps computed by OpenMVS (one file per image) when it changes, and
+    warns once if an NVIDIA GPU is present but stays idle while the depth maps are computed (gpu_base: memory used
+    on the GPU before ODM started, MB).
+    """
+    from .resources import nvidia_status
     d = os.path.join(project_dir, 'opensfm', 'undistorted', 'openmvs', 'depthmaps')
     img = os.path.join(project_dir, 'opensfm', 'undistorted', 'images')
-    t0, last = time.time(), -1
+    t0, last, idle, used, warned = time.time(), -1, 0, False, False
     while not stop.wait(every):
         try:
             done = len({m.group(1) for f in os.listdir(d) for m in [re.match(r'depth(\d+)\.dmap$', f)] if m})
@@ -563,9 +629,31 @@ def _watch_depthmaps(project_dir, stop, every=60):
             el = (time.time() - t0) / 60
             left = f', about {el / done * (total - done):.0f} min left for the depth maps' if total > done else ''
             log(f'dense matching: {done}/{total or "?"} depth maps in {el:.0f} min{left}')
+        if gpu_base is None or used or warned or (total and done >= total):
+            continue
+        g = nvidia_status()
+        if not g:
+            continue
+        g = g[0]
+        if (g['mem_used_mb'] or 0) - gpu_base > 200 or (g['util'] or 0) > 10:
+            used = True
+            log(f'GPU in use for the dense matching: {g["name"]}, {g["mem_used_mb"]:.0f} MB, {g["util"]:.0f} %')
+            continue
+        idle += 1
+        if idle >= 3:
+            warned = True
+            LAST_RUN['gpu_idle'] = g
+            power = (f'; power limit {g["power_limit_w"]:.0f} W: a laptop in power saving mode, or on battery, limits '
+                     f'its GPU' if g.get('power_limit_w') and g['power_limit_w'] < 30 else '')
+            log('!' * 100)
+            log(f'ODM IS NOT USING THE NVIDIA GPU ({g["name"]}: {g["mem_used_mb"]:.0f} MB used, {g["util"]:.0f} % for '
+                f'{idle} min while the depth maps are computed){power}.')
+            log('The dense matching runs on the processor: 3 to 10 times slower. The processing goes on. To find the '
+                'cause: canobsR::canobs_check_odm_gpu() (see the tutorial, section GPU).')
+            log('!' * 100)
 
 
-LAST_RUN = {'densify_failed': False}     # set by run_odm(): the dense matching (OpenMVS) failed in the last run
+LAST_RUN = {'densify_failed': False, 'gpu_idle': None}     # set by run_odm(): the dense matching (OpenMVS) failed in the last run
 
 
 def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
@@ -591,8 +679,10 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
                                 env=env, text=True, encoding='utf-8', errors='replace')
         # OpenMVS prints nothing while it computes the depth maps (can last hours): their files show the progress
         stop = threading.Event()
+        from .resources import nvidia_status
+        g0 = nvidia_status()
         watcher = threading.Thread(target=_watch_depthmaps, args=(os.path.join(datasets_dir, project), stop),
-                                   daemon=True)
+                                   kwargs={'gpu_base': (g0[0]['mem_used_mb'] or 0) if g0 else None}, daemon=True)
         watcher.start()
         for line in proc.stdout:
             logfile.write(line)

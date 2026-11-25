@@ -3,6 +3,7 @@
 export(aggregate_mosaics)
 export(align_mosaics)
 export(canobs_activate_metashape)
+export(canobs_check_odm_gpu)
 export(canobs_config)
 export(canobs_install_metashape)
 export(canobs_install_odm)

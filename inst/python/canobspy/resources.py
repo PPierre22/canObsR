@@ -78,3 +78,38 @@ def auto_workers(per_worker_gb, n_cores='auto', max_memory_gb='auto', cap=None):
            + (f'{budget:.0f} GB of memory allowed / {per_worker_gb:.1f} GB each = {n_mem}' if budget else 'memory unknown')
            + (f'; limit {cap}' if cap and cap < min(n_cpu, n_mem) else '') + ')')
     return n, why
+
+
+def nvidia_smi():
+    """Path of nvidia-smi, None if there is no NVIDIA driver."""
+    import shutil
+    p = shutil.which('nvidia-smi')
+    if not p and sys.platform == 'win32':
+        p = os.path.join(os.environ.get('SystemRoot', 'C:/Windows'), 'System32', 'nvidia-smi.exe')
+    return p if p and os.path.isfile(p) else None
+
+
+def nvidia_status():
+    """List of dicts (name, mem_used_mb, mem_total_mb, util, power_w, power_limit_w) per NVIDIA GPU; [] if none."""
+    import subprocess
+    exe = nvidia_smi()
+    if not exe:
+        return []
+    try:
+        out = subprocess.run([exe, '--query-gpu=name,memory.used,memory.total,utilization.gpu,power.draw,power.limit',
+                              '--format=csv,noheader,nounits'], capture_output=True, text=True, timeout=20).stdout
+    except Exception:  # noqa: BLE001
+        return []
+    gpus = []
+    for line in out.strip().splitlines():
+        f = [x.strip() for x in line.split(',')]
+
+        def num(x):
+            try:
+                return float(x)
+            except ValueError:
+                return None
+        if len(f) >= 6:
+            gpus.append({'name': f[0], 'mem_used_mb': num(f[1]), 'mem_total_mb': num(f[2]), 'util': num(f[3]),
+                         'power_w': num(f[4]), 'power_limit_w': num(f[5])})
+    return gpus
