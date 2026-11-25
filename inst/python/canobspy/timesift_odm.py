@@ -67,6 +67,8 @@ DENSE_OPTIONS = {'--pc-quality': (1, 'openmvs'), '--pc-skip-geometric': (0, 'ope
                  '--dem-decimation': (1, 'mvs_texturing'), '--orthophoto-compression': (1, 'mvs_texturing'),
                  '--orthophoto-cutline': (0, 'mvs_texturing'), '--skip-report': (0, 'mvs_texturing'),
                  '--build-overviews': (0, 'mvs_texturing'), '--cog': (0, 'mvs_texturing')}
+# Options that change how ODM runs, not its results: never compared between runs (a run can be resumed with them)
+EXEC_OPTIONS = {'--no-gpu': 0, '--max-concurrency': 1, '--optimize-disk-space': 0}
 # Settings of the Metashape pipeline of canobsR, reproduced with ODM (see the documentation of the engines):
 GPS_ACCURACY = 10               # m, Metashape default accuracy of the camera positions (Reference settings)
 KEYPOINT_LIMIT = 10000          # keypoints per image (Metashape pipeline: 100000; see ENGINES.md, tests of 24/11/2026)
@@ -541,6 +543,9 @@ def check_odm_gpu(odm_path, fix=True):
     return {'status': 'dummy_present', 'path': dummy}
 
 
+LAST_RUN = {'densify_failed': False}     # set by run_odm(): the dense matching (OpenMVS) failed in the last run
+
+
 def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
     """Runs ODM, writes its log in datasets_dir/odm_<project>.log and the time spent in each stage in timings.csv."""
     cmd = odm_command(runner, odm_path, datasets_dir, project, options)
@@ -553,6 +558,7 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
         os.makedirs(tmp_dir, exist_ok=True)
         env.update(TMP=tmp_dir, TEMP=tmp_dir, TMPDIR=tmp_dir, CPL_TMPDIR=tmp_dir)
     started, gpu_lines = {}, []
+    LAST_RUN['densify_failed'] = False
     timings = os.path.join(datasets_dir, TIMINGS_FILE)
     new_file = not os.path.isfile(timings)
     with open(os.path.join(datasets_dir, f'odm_{project}.log'), 'a', encoding='utf-8', errors='replace') as logfile, \
@@ -576,6 +582,8 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
                     tfile.flush()
             elif GPU_RE.search(line) and len(gpu_lines) < 5 and line.strip() not in gpu_lines:
                 gpu_lines.append(line.strip())
+            if 'ran out of memory' in line or re.search(r'stages[\\/]openmvs\.py', line):
+                LAST_RUN['densify_failed'] = True
         code = proc.wait()
     if gpu_lines:
         log('GPU information found in the ODM log: ' + ' | '.join(gpu_lines))
@@ -1251,6 +1259,9 @@ def _split_options(options):
     sfm, dense, k = [], [], 0
     while k < len(options):
         o = options[k]
+        if o in EXEC_OPTIONS:
+            k += 1 + EXEC_OPTIONS[o]
+            continue
         n = DENSE_OPTIONS.get(o, (None,))[0]
         if n is None:
             sfm.append(o)
@@ -1518,9 +1529,25 @@ def timesift_odm_process(pathDIR,
                 make_epoch_project(workdir, epoch, images, gains)
                 rerun = ['--rerun-from', 'openmvs']
             code = run_odm(odm_runner, odm_path, workdir, epoch, options + rerun, tmp_dir)
+            if not os.path.isfile(ortho) and LAST_RUN['densify_failed'] and '--no-gpu' not in options:
+                # OpenMVS failed, usually for lack of memory (GPU memory of a laptop, or RAM with many threads):
+                # second try on the processor, with half of the threads. Same results, slower.
+                n_thr = max(1, (os.cpu_count() or 2) // 2)
+                log('*' * 100)
+                log(f'Epoch {epoch}: the dense matching (OpenMVS) failed, probably for lack of memory. Second try on '
+                    f'the processor (--no-gpu) with {n_thr} threads: same result, slower.')
+                log('*' * 100)
+                code = run_odm(odm_runner, odm_path, workdir, epoch,
+                               options + ['--no-gpu', '--max-concurrency', str(n_thr), '--rerun-from', 'openmvs'], tmp_dir)
             if not os.path.isfile(ortho):
+                hint = ''
+                if LAST_RUN['densify_failed']:
+                    hint = ('\nThe dense matching (OpenMVS) failed, also on the processor: probably not enough memory '
+                            'for this computer. Options: downscale_factor_depth_map = 4 (depth maps at 1/4 of the image '
+                            'size instead of 1/2: less memory, less detailed surface), or a computer with more memory. '
+                            'The SfM is kept: running again resumes from the dense matching.')
                 raise TimeSiftError(f'ODM failed for epoch {epoch} (exit code {code}). '
-                                    f'See {os.path.join(workdir, "odm_" + epoch + ".log")}')
+                                    f'See {os.path.join(workdir, "odm_" + epoch + ".log")}{hint}')
             with open(ep_file, 'w', encoding='utf-8') as f:
                 json.dump(epoch_params, f, indent=1)
         check = verify_epoch_project(workdir, epoch, valid, list(epochs))
