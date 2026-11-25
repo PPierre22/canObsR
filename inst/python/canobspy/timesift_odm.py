@@ -551,18 +551,18 @@ def _watch_depthmaps(project_dir, stop, every=60):
     """Prints the number of depth maps computed by OpenMVS (one file per image) when it changes."""
     d = os.path.join(project_dir, 'opensfm', 'undistorted', 'openmvs', 'depthmaps')
     img = os.path.join(project_dir, 'opensfm', 'undistorted', 'images')
-    t0, last = None, -1
+    t0, last = time.time(), -1
     while not stop.wait(every):
         try:
             done = len({m.group(1) for f in os.listdir(d) for m in [re.match(r'depth(\d+)\.dmap$', f)] if m})
             total = len(os.listdir(img)) if os.path.isdir(img) else 0
         except OSError:
             continue
-        if t0 is None:
-            t0 = time.time()
-        if done != last:
+        if done != last and done > 0:
             last = done
-            log(f'dense matching: {done}/{total or "?"} depth maps ({(time.time() - t0) / 60:.0f} min)')
+            el = (time.time() - t0) / 60
+            left = f', about {el / done * (total - done):.0f} min left for the depth maps' if total > done else ''
+            log(f'dense matching: {done}/{total or "?"} depth maps in {el:.0f} min{left}')
 
 
 LAST_RUN = {'densify_failed': False}     # set by run_odm(): the dense matching (OpenMVS) failed in the last run
