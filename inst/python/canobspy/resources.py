@@ -113,3 +113,42 @@ def nvidia_status():
             gpus.append({'name': f[0], 'mem_used_mb': num(f[1]), 'mem_total_mb': num(f[2]), 'util': num(f[3]),
                          'power_w': num(f[4]), 'power_limit_w': num(f[5])})
     return gpus
+
+
+def power_status():
+    """
+    Windows: {'on_battery': bool, 'energy_saver': bool} (GetSystemPowerStatus: AC line, battery/energy saver);
+    None elsewhere or if unknown. A laptop on battery or with the energy saver on can leave its NVIDIA GPU unused.
+    """
+    if sys.platform != 'win32':
+        return None
+    try:
+        import ctypes
+
+        class SYSTEM_POWER_STATUS(ctypes.Structure):
+            _fields_ = [('ACLineStatus', ctypes.c_ubyte), ('BatteryFlag', ctypes.c_ubyte),
+                        ('BatteryLifePercent', ctypes.c_ubyte), ('SystemStatusFlag', ctypes.c_ubyte),
+                        ('BatteryLifeTime', ctypes.c_ulong), ('BatteryFullLifeTime', ctypes.c_ulong)]
+        st = SYSTEM_POWER_STATUS()
+        if not ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(st)):
+            return None
+        return {'on_battery': st.ACLineStatus == 0, 'energy_saver': bool(st.SystemStatusFlag & 1),
+                'has_battery': st.BatteryFlag != 128}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def power_warning():
+    """Text of a warning if the computer may slow down the GPU (battery, energy saver), else ''."""
+    p = power_status()
+    if not p:
+        return ''
+    w = []
+    if p['on_battery']:
+        w.append('the computer runs on battery')
+    if p['energy_saver']:
+        w.append('the Windows energy saver is on')
+    if not w:
+        return ''
+    return (' and '.join(w) + ': the NVIDIA GPU may be left unused or limited (dense matching 3-10 x slower). Plug '
+            'the computer in, turn the energy saver off and choose Settings > System > Power > "Best performance".')

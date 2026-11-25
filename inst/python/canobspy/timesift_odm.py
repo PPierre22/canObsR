@@ -601,7 +601,8 @@ def probe_openmvs_gpu(odm_path, scene, seconds=240, out_dir=None):
     stop.set()
     key = [x for x in lines if re.search(r'cuda|gpu|device|nvidia', x, re.I)]
     used = peak['mem'] > 200 or peak['util'] > 10
-    res = {'gpus': g0, 'gpu_used': used, 'gpu_mem_mb': round(peak['mem']), 'gpu_util': peak['util'],
+    from .resources import power_warning
+    res = {'gpus': g0, 'gpu_used': used, 'power_warning': power_warning(), 'gpu_mem_mb': round(peak['mem']), 'gpu_util': peak['util'],
            'cuda_lines': key[:20], 'last_lines': lines[-15:], 'exit_code': proc.returncode,
            'seconds': round(time.time() - t0)}
     shutil.rmtree(tmp, ignore_errors=True)
@@ -1550,7 +1551,12 @@ def timesift_odm_process(pathDIR,
         options += ['--dsm', '--dem-resolution', str(float(resol_ref) * 100)]
     options += [str(a) for a in (odm_args or [])]
     if '--max-concurrency' not in options:            # threads: memory of the dense matching per thread
-        from .resources import auto_workers
+        from .resources import auto_workers, power_warning
+        pw = power_warning()
+        if pw:
+            log('!' * 100)
+            log('WARNING: ' + pw)
+            log('!' * 100)
         per_thread = THREAD_MEMORY_GB.get(int(downscale_factor_depth_map), 1.5)
         n_thr, why = auto_workers(per_thread, n_cores, max_memory_gb)
         options += ['--max-concurrency', str(n_thr)]

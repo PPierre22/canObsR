@@ -683,6 +683,9 @@ canobs_sitrep <- function() {
    .say(if (is.null(odm)) "no" else "ok", "ODM: ", if (is.null(odm)) "not found" else paste(.odm_version(odm), odm))
    if (is.null(odm)) .say("info", if (.is_windows()) "   canobsR::canobs_install_odm() installs it" else
                          "   with docker: generate_Mosa(..., odm_runner = \"docker\")")
+   pw <- tryCatch(.canobs_python(c("-c", "from canobspy.resources import power_warning; print(power_warning())"),
+                                 echo = FALSE)$stdout, error = function(e) "")
+   if (nzchar(trimws(pw))) .say("ko", trimws(pw))
    smi <- Sys.which("nvidia-smi")
    gpu <- if (nzchar(smi)) tryCatch(system2(smi, c("--query-gpu=name,driver_version", "--format=csv,noheader"),
                                             stdout = TRUE, stderr = FALSE), error = function(e) character(0))

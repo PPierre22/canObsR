@@ -39,7 +39,9 @@ canobs_check_odm_gpu <- function(project_dir, seconds = 240) {
       .say("no", "no NVIDIA GPU found (nvidia-smi): ODM computes on the processor")
    } else {
       g <- r$gpus[[1]]
-      .say("info", "GPU: ", g$name, ", ", round(g$mem_total_mb), " MB, power limit ", g$power_limit_w, " W")
+      .say("info", "GPU: ", g$name, ", ", round(g$mem_total_mb), " MB",
+           if (!is.null(g$power_limit_w)) paste0(", power limit ", g$power_limit_w, " W"))
+      if (nzchar(r$power_warning %||% "")) .say("ko", r$power_warning)
       if (!is.null(g$power_limit_w) && g$power_limit_w < 30)
          .say("ko", "power limit of ", g$power_limit_w, " W: the GPU is in power saving mode (laptop on battery, or ",
               "Windows / maker's software in an energy saving profile): plug it in and choose \"Best performance\"")
@@ -52,8 +54,12 @@ canobs_check_odm_gpu <- function(project_dir, seconds = 240) {
    if (length(r$cuda_lines)) {
       message("Messages of OpenMVS about CUDA / GPU:")
       message(paste("   ", unlist(r$cuda_lines), collapse = "\n"))
-   } else message("OpenMVS wrote nothing about CUDA / GPU. Its last messages:\n",
-                  paste("   ", unlist(r$last_lines), collapse = "\n"))
+   } else if (length(unlist(r$last_lines)) && any(nzchar(unlist(r$last_lines)))) {
+      message("OpenMVS wrote nothing about CUDA / GPU. Its last messages:\n",
+              paste("   ", unlist(r$last_lines), collapse = "\n"))
+   }
    message(bar)
    invisible(r)
 }
+
+`%||%` <- function(a, b) if (is.null(a)) b else a

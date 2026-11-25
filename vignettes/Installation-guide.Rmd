@@ -162,9 +162,11 @@ canobsR::canobs_check_odm_gpu("D:/bouamir/2_mosaics/projects")
 runs the dense matching for a few minutes with all its messages and says whether the GPU is used, and why not.
 Frequent causes, seen on our computers:
 
-* **laptop in power saving mode, or on battery**: the GPU is limited to a few watts (shown by
-  `canobs_check_odm_gpu()`). Plug it in, and choose *Settings > System > Power > Best performance*, and the
-  performance profile of the maker's software if there is one;
+* **laptop with the Windows energy saver on, or on battery**: the NVIDIA GPU is left unused or limited to a few
+  watts. Seen on a laptop (RTX 2000 Ada): GPU idle in energy saver mode, used at 89 % in *Best performance*.
+  canobsR warns at the start of each ODM run (and `canobs_sitrep()`) when the computer is on battery or the
+  energy saver is on. Plug it in, turn the energy saver off, choose *Settings > System > Power > Best
+  performance*, and the performance profile of the maker's software if there is one;
 * **ODM's dummy `nvcuda.dll`** (Windows installer of ODM): renamed by `canobs_setup()` / `canobs_install_odm()`;
 * **not enough GPU memory** for the depth maps (laptop GPUs of 4-8 GB): ODM then fails, and canobsR processes the
   date again on the processor automatically; `downscale_factor_depth_map = 4` needs 4 times less memory.
