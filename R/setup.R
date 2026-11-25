@@ -671,6 +671,14 @@ canobs_sitrep <- function() {
                                                 if (isTRUE(v$metashape_activated)) " (licence activated)" else " (NO ACTIVATED LICENCE)"))
       }
    }
+   r <- tryCatch(.canobs_python(c("-c", paste0(
+      "import json; from canobspy.resources import system_resources, auto_workers; r = system_resources(); ",
+      "r['odm'] = auto_workers(1.5)[0]; r['arosics'] = auto_workers(2.7)[0]; print(json.dumps(r))")), echo = FALSE),
+      error = function(e) NULL)
+   res <- tryCatch(jsonlite::fromJSON(utils::tail(strsplit(r$stdout, "\n")[[1]], 1)), error = function(e) NULL)
+   if (!is.null(res))
+      .say("ok", "computer: ", res$cores, " processors, ", res$ram_total_gb, " GB of RAM; n_cores = \"auto\" gives ",
+           res$odm, " ODM threads and ", res$arosics, " AROSICS processes (300 ha at 5 cm)")
    odm <- .find_odm(cfg$odm_path)
    .say(if (is.null(odm)) "no" else "ok", "ODM: ", if (is.null(odm)) "not found" else paste(.odm_version(odm), odm))
    if (is.null(odm)) .say("info", if (.is_windows()) "   canobsR::canobs_install_odm() installs it" else

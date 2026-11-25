@@ -67,6 +67,9 @@ DENSE_OPTIONS = {'--pc-quality': (1, 'openmvs'), '--pc-skip-geometric': (0, 'ope
                  '--dem-decimation': (1, 'mvs_texturing'), '--orthophoto-compression': (1, 'mvs_texturing'),
                  '--orthophoto-cutline': (0, 'mvs_texturing'), '--skip-report': (0, 'mvs_texturing'),
                  '--build-overviews': (0, 'mvs_texturing'), '--cog': (0, 'mvs_texturing')}
+# memory per ODM thread (GB), mostly for the dense matching (OpenMVS), by downscale_factor_depth_map (20 Mpx images).
+# Seen: 28 threads at factor 2 fail with 32 GB of RAM (laptop, 25/11/2026); 64 threads work with 99 GB (server).
+THREAD_MEMORY_GB = {1: 4.0, 2: 1.5, 4: 0.5, 8: 0.25, 16: 0.15}
 # Options that change how ODM runs, not its results: never compared between runs (a run can be resumed with them)
 EXEC_OPTIONS = {'--no-gpu': 0, '--max-concurrency': 1, '--optimize-disk-space': 0}
 # Settings of the Metashape pipeline of canobsR, reproduced with ODM (see the documentation of the engines):
@@ -1344,6 +1347,8 @@ def timesift_odm_process(pathDIR,
                          overwrite=False,
                          keep_project=None,
                          tmp_dir=None,
+                         n_cores='auto',
+                         max_memory_gb='auto',
                          ):
     """
     Complete Time-SIFT process with ODM: one orthomosaic (and optionally one DSM) per date or per flight.
@@ -1372,6 +1377,9 @@ def timesift_odm_process(pathDIR,
         run with the same images and parameters is resumed (an error is raised if they differ).
     :param bool keep_project: keeps the ODM projects at the end (default: True if out_dir_project is given).
     :param str tmp_dir: directory for the temporary files of ODM (default: the system one).
+    :param n_cores: threads of ODM (--max-concurrency): an integer, or 'auto' (processors minus a few, limited by
+        the memory: about 1.5 GB per thread for the dense matching at downscale_factor_depth_map = 2).
+    :param max_memory_gb: memory ODM may use, for n_cores = 'auto' (default 'auto': 75 % of the RAM).
     :return: dict {epoch: path of the orthomosaic}
     """
     t0 = time.time()
@@ -1426,6 +1434,12 @@ def timesift_odm_process(pathDIR,
     if out_dir_DEM is not None:
         options += ['--dsm', '--dem-resolution', str(float(resol_ref) * 100)]
     options += [str(a) for a in (odm_args or [])]
+    if '--max-concurrency' not in options:            # threads: memory of the dense matching per thread
+        from .resources import auto_workers
+        per_thread = THREAD_MEMORY_GB.get(int(downscale_factor_depth_map), 1.5)
+        n_thr, why = auto_workers(per_thread, n_cores, max_memory_gb)
+        options += ['--max-concurrency', str(n_thr)]
+        log(f'ODM threads: {why}')
 
     if site_name:                                      # same file names as the Metashape pipeline: <site>_<date><suffix>
         site_name = site_name + '_'
@@ -1532,18 +1546,21 @@ def timesift_odm_process(pathDIR,
             if not os.path.isfile(ortho) and LAST_RUN['densify_failed'] and '--no-gpu' not in options:
                 # OpenMVS failed, usually for lack of memory (GPU memory of a laptop, or RAM with many threads):
                 # second try on the processor, with half of the threads. Same results, slower.
-                n_thr = max(1, (os.cpu_count() or 2) // 2)
+                cur = options[options.index('--max-concurrency') + 1] if '--max-concurrency' in options else os.cpu_count()
+                n_thr = max(1, int(cur or 2) // 2)
                 log('*' * 100)
                 log(f'Epoch {epoch}: the dense matching (OpenMVS) failed, probably for lack of memory. Second try on '
                     f'the processor (--no-gpu) with {n_thr} threads: same result, slower.')
                 log('*' * 100)
+                retry = [o for i, o in enumerate(options) if o != '--max-concurrency'
+                         and (i == 0 or options[i - 1] != '--max-concurrency')]
                 code = run_odm(odm_runner, odm_path, workdir, epoch,
-                               options + ['--no-gpu', '--max-concurrency', str(n_thr), '--rerun-from', 'openmvs'], tmp_dir)
+                               retry + ['--no-gpu', '--max-concurrency', str(n_thr), '--rerun-from', 'openmvs'], tmp_dir)
             if not os.path.isfile(ortho):
                 hint = ''
                 if LAST_RUN['densify_failed']:
                     hint = ('\nThe dense matching (OpenMVS) failed, also on the processor: probably not enough memory '
-                            'for this computer. Options: downscale_factor_depth_map = 4 (depth maps at 1/4 of the image '
+                            'for this computer. Options: fewer threads (n_cores), downscale_factor_depth_map = 4 (depth maps at 1/4 of the image '
                             'size instead of 1/2: less memory, less detailed surface), or a computer with more memory. '
                             'The SfM is kept: running again resumes from the dense matching.')
                 raise TimeSiftError(f'ODM failed for epoch {epoch} (exit code {code}). '

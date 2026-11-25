@@ -12,6 +12,7 @@ generate_mosaics(
   crs = "auto",
   keep_dem = FALSE,
   tmp_dir = NULL,
+  n_cores = "auto",
   ...
 )
 }
@@ -33,6 +34,11 @@ WGS 84 / UTM zone of the site, from the GPS positions of the images.}
 \item{tmp_dir}{character. Folder for the temporary files (tens of GB for large sites): on a disk with space.
 Default: \verb{out_dir/_tmp}.}
 
+\item{n_cores}{Threads of ODM: an integer, or \code{"auto"} (default): the processors minus a few left free for the
+computer, limited by the memory (about 1.5 GB per thread for the dense matching; e.g. 16 threads on a laptop
+with 28 processors and 32 GB, 49 on a server with 64 processors and 99 GB). The choice is printed. Metashape
+manages its processors itself.}
+
 \item{...}{Advanced options (an unknown name is an error):
 \itemize{
 \item plan (used when the plan is made, see \code{\link[=plan_mosaics]{plan_mosaics()}}): \code{chunk_size} (10), \code{split_drones} (TRUE),
@@ -45,7 +51,8 @@ prefix of the file names), \code{overwrite} (FALSE: TRUE makes again the mosaics
 \item photogrammetry, see \code{\link[=generate_Mosa]{generate_Mosa()}}: \code{keypoint_limit} (ODM 10000, Metashape 100000), \code{tiepoint_limit},
 \code{calibrate_col}, \code{calibrate_col_by}, \code{calibrate_vignetting}, \code{from_mesh}, \code{downscale_factor_alignement},
 \code{downscale_factor_depth_map}, \code{data_type}, \code{sun_sensor}, \code{check_dates}, \code{odm_path}, \code{odm_runner},
-\code{odm_args}, \code{odm_gpu_fix}.
+\code{odm_args}, \code{odm_gpu_fix};
+\item resources: \code{max_memory_gb} (memory ODM may use, for \code{n_cores = "auto"}; default 75 \% of the RAM).
 }}
 }
 \value{

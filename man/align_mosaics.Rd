@@ -9,6 +9,7 @@ align_mosaics(
   out_dir,
   mode = c("previous", "fixed", "nearest"),
   reference = NULL,
+  n_cores = "auto",
   ...
 )
 }
@@ -22,10 +23,14 @@ align_mosaics(
 \item{reference}{character. \code{"fixed"}: reference raster; \code{"nearest"}: folder of dated reference rasters;
 \code{"previous"}: optional raster on which the first mosaic is aligned.}
 
+\item{n_cores}{Parallel processes of AROSICS: an integer, or \code{"auto"} (default): the processors minus a few left
+free, limited by the memory (each process holds a copy of the matching band of the mosaic: about 2.5 GB for 300
+ha at 5 cm), at most 60 on Windows. The choice is printed for each mosaic.}
+
 \item{...}{Advanced options (an unknown name is an error): \code{ref_resolution} (0.5 m), \code{min_ref_coverage} (0.9),
 AROSICS parameters \code{grid_res} (200: distance between tie points, in pixels of the mosaic), \code{window_size} (200:
-matching window, pixels), \code{max_shift} (60 pixels), \code{max_iter} (100), \code{n_cores} (processes; default
-min(processors, 16)), \code{min_points} (10: fewer valid tie points = failure), \code{resampling} ("cubic"); \code{overwrite}
+matching window, pixels), \code{max_shift} (60 pixels), \code{max_iter} (100), \code{max_memory_gb} (memory AROSICS may
+use, for \code{n_cores = "auto"}; default 75 \% of the RAM), \code{min_points} (10: fewer valid tie points = failure), \code{resampling} ("cubic"); \code{overwrite}
 (FALSE), \code{on_error} ("continue" or "stop"), \code{epochs} (names of the mosaics to align, default all),
 \code{share_by_chunk} (TRUE: one measure of the shifts per Time-SIFT chunk and reference, see Details), \code{plan}
 (\code{plan.csv} of \code{\link[=generate_mosaics]{generate_mosaics()}}; default: next to \code{mosaics_dir}), \code{max_candidates} (3).}

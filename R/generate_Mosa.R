@@ -43,6 +43,10 @@
 #' @param out_dir_project character. Folder where the Metashape project is saved. If no path is specified, the project is not saved by default.
 #' @param data_type character. The type of the data used. Either 'RGB' (default) or 'MS' (for multispectral images).
 #' @param resol_ref numeric. The resolution (in meters) used to generate DEMs and orthomosaics. Defaults to 0.05.
+#' @param n_cores Threads of ODM: an integer, or `"auto"` (default): the processors minus a few left free, limited by
+#'   the memory (about 1.5 GB per thread for the dense matching with `downscale_factor_depth_map = 2`, 0.5 GB with
+#'   4). Metashape manages its processors and GPU itself.
+#' @param max_memory_gb Memory (GB) that ODM may use, for `n_cores = "auto"`. `"auto"` (default): 75 % of the RAM.
 #' @param crs character. Coordinate system of the orthomosaics, e.g. `"EPSG:32633"`. `"auto"` (default): the WGS 84 / UTM
 #'   zone of the site, found from the GPS positions of a few images of each folder.
 #' @param site_name character. Adds the data site name into the names of all created folders and files, to better separate generated data from different projects. If not specified, the names will stay generic.
@@ -150,7 +154,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                        odm_args = NULL, overwrite = FALSE, check_dates = TRUE,
                        tempdir_custom = getOption("canobsR.tempdir", NULL),
                        keypoint_limit = NULL, tiepoint_limit = 10000L,
-                       calibrate_vignetting = TRUE, odm_gpu_fix = TRUE) {
+                       calibrate_vignetting = TRUE, odm_gpu_fix = TRUE, n_cores = "auto",
+                       max_memory_gb = "auto") {
 
    engine <- match.arg(engine)
    if (is.null(keypoint_limit)) keypoint_limit <- if (engine == "odm") 10000L else 100000L
@@ -248,7 +253,9 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                                   from_mesh = from_mesh,
                                   odm_gpu_fix = FALSE,
                                   check_dates = check_dates,
-                                  tmp_dir = tmp_sub
+                                  tmp_dir = tmp_sub,
+                                  n_cores = n_cores,
+                                  max_memory_gb = max_memory_gb
                                   )
 
    # same format as the Metashape outputs: RGB, white background, resol_ref grid, crs

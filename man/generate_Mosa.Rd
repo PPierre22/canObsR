@@ -32,7 +32,9 @@ generate_Mosa(
   keypoint_limit = NULL,
   tiepoint_limit = 10000L,
   calibrate_vignetting = TRUE,
-  odm_gpu_fix = TRUE
+  odm_gpu_fix = TRUE,
+  n_cores = "auto",
+  max_memory_gb = "auto"
 )
 }
 \arguments{
@@ -125,6 +127,12 @@ OpenMVS (\code{SuperBuild/install/bin}), which hides the NVIDIA driver: OpenMVS 
 slower, without any message. With \code{TRUE} (default), when an NVIDIA driver is installed, this file is renamed
 \code{nvcuda.dll.odm_dummy} before each run (each ODM installation or update puts it back). If it cannot be renamed
 (rights on the ODM folder), or with \code{FALSE}, a warning is given.}
+
+\item{n_cores}{Threads of ODM: an integer, or \code{"auto"} (default): the processors minus a few left free, limited by
+the memory (about 1.5 GB per thread for the dense matching with \code{downscale_factor_depth_map = 2}, 0.5 GB with
+4). Metashape manages its processors and GPU itself.}
+
+\item{max_memory_gb}{Memory (GB) that ODM may use, for \code{n_cores = "auto"}. \code{"auto"} (default): 75 \% of the RAM.}
 }
 \value{
 None (metashape) or, invisibly, the paths of the orthomosaics (odm).

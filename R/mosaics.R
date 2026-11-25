@@ -133,7 +133,9 @@ plan_mosaics <- function(flights_dir, out_dir, chunk_size = 10L, split_drones = 
    keypoint_limit = NULL, tiepoint_limit = 10000L, calibrate_col = TRUE, calibrate_col_by = "chunk",
    calibrate_vignetting = TRUE, from_mesh = FALSE, downscale_factor_alignement = 1L, downscale_factor_depth_map = 2L,
    data_type = "RGB", sun_sensor = FALSE, check_dates = TRUE,
-   odm_path = NULL, odm_runner = "native", odm_args = NULL, odm_gpu_fix = TRUE)
+   odm_path = NULL, odm_runner = "native", odm_args = NULL, odm_gpu_fix = TRUE,
+   # resources
+   max_memory_gb = "auto")
 
 .check_options <- function(dots) {
    bad <- setdiff(names(dots), names(.mosaic_options))
@@ -189,6 +191,10 @@ plan_mosaics <- function(flights_dir, out_dir, chunk_size = 10L, split_drones = 
 #' @param keep_dem logical. Also saves the elevation models (DSM), in `out_dir/dem` (ODM: computing time + 10-20 %).
 #' @param tmp_dir character. Folder for the temporary files (tens of GB for large sites): on a disk with space.
 #'   Default: `out_dir/_tmp`.
+#' @param n_cores Threads of ODM: an integer, or `"auto"` (default): the processors minus a few left free for the
+#'   computer, limited by the memory (about 1.5 GB per thread for the dense matching; e.g. 16 threads on a laptop
+#'   with 28 processors and 32 GB, 49 on a server with 64 processors and 99 GB). The choice is printed. Metashape
+#'   manages its processors itself.
 #' @param ... Advanced options (an unknown name is an error):
 #'   * plan (used when the plan is made, see [plan_mosaics()]): `chunk_size` (10), `split_drones` (TRUE),
 #'     `order` ("random"), `seed` (1);
@@ -200,7 +206,8 @@ plan_mosaics <- function(flights_dir, out_dir, chunk_size = 10L, split_drones = 
 #'   * photogrammetry, see [generate_Mosa()]: `keypoint_limit` (ODM 10000, Metashape 100000), `tiepoint_limit`,
 #'     `calibrate_col`, `calibrate_col_by`, `calibrate_vignetting`, `from_mesh`, `downscale_factor_alignement`,
 #'     `downscale_factor_depth_map`, `data_type`, `sun_sensor`, `check_dates`, `odm_path`, `odm_runner`,
-#'     `odm_args`, `odm_gpu_fix`.
+#'     `odm_args`, `odm_gpu_fix`;
+#'   * resources: `max_memory_gb` (memory ODM may use, for `n_cores = "auto"`; default 75 % of the RAM).
 #' @return Invisibly, the journal (data.frame, one row per epoch: `chunk`, `epoch`, `status`, `started`, `minutes`,
 #'   `file`, `message`).
 #' @export
@@ -214,7 +221,7 @@ plan_mosaics <- function(flights_dir, out_dir, chunk_size = 10L, split_drones = 
 #'                  tmp_dir = "E:/tmp", chunk_size = 6, keypoint_limit = 20000)
 #' }
 generate_mosaics <- function(flights_dir, out_dir, engine = c("odm", "metashape"), resolution = 0.05,
-                             crs = "auto", keep_dem = FALSE, tmp_dir = NULL, ...) {
+                             crs = "auto", keep_dem = FALSE, tmp_dir = NULL, n_cores = "auto", ...) {
    engine <- match.arg(engine)
    opt <- .check_options(list(...))
    opt$on_error <- match.arg(opt$on_error, c("continue", "stop"))
@@ -254,7 +261,7 @@ generate_mosaics <- function(flights_dir, out_dir, engine = c("odm", "metashape"
                         order = opt$order, seed = opt$seed)
    jr <- .read_journal(f_journal)
    ep <- unique(plan[, c("chunk", "epoch")])
-   ep$file <- file.path(d_ortho, paste0(opt$site_name, ep$epoch, ".tif"))
+   ep$file <- file.path(d_ortho, paste0(if (nzchar(opt$site_name)) paste0(opt$site_name, "_"), ep$epoch, ".tif"))
    is_done <- function(e) {
       j <- jr[jr$epoch == e & jr$status == "done", ]
       nrow(j) > 0 && file.exists(j$file[nrow(j)])
@@ -295,7 +302,7 @@ generate_mosaics <- function(flights_dir, out_dir, engine = c("odm", "metashape"
                        odm_runner = opt$odm_runner, odm_args = opt$odm_args, overwrite = opt$overwrite,
                        check_dates = opt$check_dates, tempdir_custom = tmp_dir, keypoint_limit = opt$keypoint_limit,
                        tiepoint_limit = opt$tiepoint_limit, calibrate_vignetting = opt$calibrate_vignetting,
-                       odm_gpu_fix = opt$odm_gpu_fix)
+                       odm_gpu_fix = opt$odm_gpu_fix, n_cores = n_cores, max_memory_gb = opt$max_memory_gb)
          NULL
       }, error = function(e) conditionMessage(e), interrupt = function(e) "interrupted")
       options(old)

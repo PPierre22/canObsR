@@ -117,7 +117,8 @@ Advanced options of `align_mosaics()` (see `?align_mosaics`), with the values us
 | `window_size` | 200 | size of the matching windows, pixels |
 | `max_shift` | 60 | largest shift searched, pixels |
 | `max_iter` | 100 | iterations of the matching |
-| `n_cores` | min(processors, 16) | parallel processes (each one needs memory: reduce it if the computer runs out of memory) |
+| `n_cores` | `"auto"` | parallel processes: processors minus a few, limited by the memory (each process holds a copy of the mosaic band used for matching, ~2.5 GB for 300 ha at 5 cm); an argument of the function |
+| `max_memory_gb` | 75 % of the RAM | memory that AROSICS may use, for `n_cores = "auto"` |
 | `min_points` | 10 | fewer reliable tie points: failure |
 | `epochs` | all | names of the mosaics to align, e.g. `c("20220427", "20220511")` |
 | `share_by_chunk` | TRUE | one measure per chunk and reference (needs `plan.csv`) |

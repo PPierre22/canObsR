@@ -37,11 +37,29 @@ except Exception:  # noqa: BLE001 - GDAL is checked by canobs_setup()
     pass
 
 
-def n_cpus(n=None):
-    """AROSICS processes: n, else min(CPUs, 16); at most 60 on Windows (limit of its process pool)."""
-    c = os.cpu_count() or 1
-    n = min(c, 16) if not n else int(n)
-    return max(1, min(n, 60) if sys.platform == 'win32' else n)
+N_CORES, MAX_MEMORY_GB = 'auto', 'auto'          # set by align_series()
+
+
+def n_cpus(n=None, images=()):
+    """
+    AROSICS processes: n (integer), or 'auto': processors minus a few, limited by the memory (each process holds
+    the band used for the matching of the target and the reference: about 2 x their size + 0.3 GB); at most 60 on
+    Windows (limit of its process pool).
+    """
+    from .resources import auto_workers
+    n = N_CORES if n in (None, 'auto') else n
+    per = 0.3
+    try:
+        from osgeo import gdal
+        for p in images:
+            ds = gdal.Open(p)
+            per += 2 * ds.RasterXSize * ds.RasterYSize * gdal.GetDataTypeSize(ds.GetRasterBand(1).DataType) / 8 / 1e9
+            ds = None
+    except Exception:  # noqa: BLE001 - size unknown: default estimate
+        per = 2.0
+    k, why = auto_workers(per, n, MAX_MEMORY_GB, cap=60 if sys.platform == 'win32' else None)
+    log(f'    AROSICS processes: {why}')
+    return k
 
 
 def date_of(name):
@@ -135,7 +153,7 @@ def coregister(ref, target, out, grid_res=200, window_size=200, max_shift=60, ma
     r = None
     tmp = out + '.tmp.tif'
     crl = COREG_LOCAL(ref, target, grid_res=grid_res, window_size=(window_size, window_size), max_shift=max_shift,
-                      max_iter=max_iter, CPUs=n_cpus(n_cores), nodata=(r_nd, s_nd), r_b4match=1, s_b4match=s_band,
+                      max_iter=max_iter, CPUs=n_cpus(n_cores, (ref, target)), nodata=(r_nd, s_nd), r_b4match=1, s_b4match=s_band,
                       path_out=tmp, fmt_out='GTIFF', out_crea_options=GTIFF_OPTIONS, resamp_alg_calc='cubic',
                       resamp_alg_deshift=resampling, align_grids=False, q=False, progress=False, ignore_errors=True)
     tab = crl.CoRegPoints_table
@@ -185,7 +203,7 @@ def apply_transform(transform, target, out, n_cores=None, resampling='cubic'):
             'mean_shifts_map': transform['mean_shifts_map'], 'success': True}
     tmp = out + '.tmp.tif'
     DESHIFTER(target, info, path_out=tmp, fmt_out='GTIFF', out_crea_options=GTIFF_OPTIONS,
-              nodata=transform.get('nodata', 255), align_grids=False, resamp_alg=resampling, CPUs=n_cpus(n_cores),
+              nodata=transform.get('nodata', 255), align_grids=False, resamp_alg=resampling, CPUs=n_cpus(n_cores, (target,)),
               q=True).correct_shifts()
     os.replace(tmp, out)
 
@@ -228,7 +246,7 @@ def _chunks_of(mosaics, plan):
 def align_series(mosaics_dir, out_dir, mode='previous', reference=None, ref_resolution=0.5,
                  min_ref_coverage=0.9, grid_res=200, window_size=200, max_shift=60, max_iter=100, n_cores=None,
                  min_points=10, resampling='cubic', overwrite=False, on_error='continue', epochs=None,
-                 plan=None, share_by_chunk=True, max_candidates=3):
+                 plan=None, share_by_chunk=True, max_candidates=3, max_memory_gb='auto'):
     """
     Aligns all the dated mosaics of mosaics_dir; results in out_dir (same file names), with align_journal.csv,
     the tie points (tie_points/), the transformations (transforms/) and the grey references (_references/).
@@ -238,6 +256,8 @@ def align_series(mosaics_dir, out_dir, mode='previous', reference=None, ref_reso
     next ones, up to max_candidates, if it fails), then applied to the other mosaics of the chunk.
     Returns the journal (list of dicts).
     """
+    global N_CORES, MAX_MEMORY_GB
+    N_CORES, MAX_MEMORY_GB = n_cores or 'auto', max_memory_gb
     t_start = time.time()
     os.makedirs(out_dir, exist_ok=True)
     d_ref, d_pts, d_tr = (os.path.join(out_dir, x) for x in ('_references', 'tie_points', 'transforms'))

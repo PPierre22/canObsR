@@ -1,5 +1,5 @@
 .align_options <- list(ref_resolution = 0.5, min_ref_coverage = 0.9, grid_res = 200L, window_size = 200L,
-                       max_shift = 60L, max_iter = 100L, n_cores = NULL, min_points = 10L, resampling = "cubic",
+                       max_shift = 60L, max_iter = 100L, max_memory_gb = "auto", min_points = 10L, resampling = "cubic",
                        overwrite = FALSE, on_error = "continue", epochs = NULL,
                        plan = NULL, share_by_chunk = TRUE, max_candidates = 3L)
 
@@ -30,10 +30,13 @@
 #' @param mode character. `"previous"`, `"fixed"` or `"nearest"`.
 #' @param reference character. `"fixed"`: reference raster; `"nearest"`: folder of dated reference rasters;
 #'   `"previous"`: optional raster on which the first mosaic is aligned.
+#' @param n_cores Parallel processes of AROSICS: an integer, or `"auto"` (default): the processors minus a few left
+#'   free, limited by the memory (each process holds a copy of the matching band of the mosaic: about 2.5 GB for 300
+#'   ha at 5 cm), at most 60 on Windows. The choice is printed for each mosaic.
 #' @param ... Advanced options (an unknown name is an error): `ref_resolution` (0.5 m), `min_ref_coverage` (0.9),
 #'   AROSICS parameters `grid_res` (200: distance between tie points, in pixels of the mosaic), `window_size` (200:
-#'   matching window, pixels), `max_shift` (60 pixels), `max_iter` (100), `n_cores` (processes; default
-#'   min(processors, 16)), `min_points` (10: fewer valid tie points = failure), `resampling` ("cubic"); `overwrite`
+#'   matching window, pixels), `max_shift` (60 pixels), `max_iter` (100), `max_memory_gb` (memory AROSICS may
+#'   use, for `n_cores = "auto"`; default 75 % of the RAM), `min_points` (10: fewer valid tie points = failure), `resampling` ("cubic"); `overwrite`
 #'   (FALSE), `on_error` ("continue" or "stop"), `epochs` (names of the mosaics to align, default all),
 #'   `share_by_chunk` (TRUE: one measure of the shifts per Time-SIFT chunk and reference, see Details), `plan`
 #'   (`plan.csv` of [generate_mosaics()]; default: next to `mosaics_dir`), `max_candidates` (3).
@@ -58,7 +61,8 @@
 #' align_mosaics("D:/bouamir/2_mosaics/orthomosaics", "D:/bouamir/3_aligned_refs",
 #'               mode = "nearest", reference = "D:/bouamir/references")
 #' }
-align_mosaics <- function(mosaics_dir, out_dir, mode = c("previous", "fixed", "nearest"), reference = NULL, ...) {
+align_mosaics <- function(mosaics_dir, out_dir, mode = c("previous", "fixed", "nearest"), reference = NULL,
+                          n_cores = "auto", ...) {
    mode <- match.arg(mode)
    dots <- list(...)
    bad <- setdiff(names(dots), names(.align_options))
@@ -80,7 +84,7 @@ align_mosaics <- function(mosaics_dir, out_dir, mode = c("previous", "fixed", "n
            if (!is.null(reference)) paste0(", reference ", reference), "\n", rule)
    old <- options(canobsR.call_log = file.path(out_dir, "logs", "align.log")); on.exit(options(old), add = TRUE)
    args <- c(list("align", "align_series", mosaics_dir = np(mosaics_dir), out_dir = np(out_dir), mode = mode,
-                  reference = np(reference)), opt)
+                  reference = np(reference), n_cores = n_cores), opt)
    if (!is.null(opt$epochs)) args$epochs <- as.list(opt$epochs)
    # plan of generate_mosaics(): next to the mosaics folder (out_dir/plan.csv, mosaics in out_dir/orthomosaics)
    if (is.null(opt$plan)) {

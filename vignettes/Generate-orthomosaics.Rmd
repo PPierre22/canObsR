@@ -85,6 +85,7 @@ That is all. With the default settings:
 | `crs` | `"auto"` | UTM zone of the site, from the GPS positions of the images (e.g. EPSG:32633) |
 | `keep_dem` | `FALSE` | `TRUE` also saves the elevation models in `out_dir/dem` |
 | `tmp_dir` | `out_dir/_tmp` | temporary files (tens of GB for large sites): put it on a disk with space |
+| `n_cores` | `"auto"` | threads of ODM: processors minus a few, limited by the memory (see below) |
 
 What it prints:
 
@@ -159,8 +160,14 @@ table(plan$chunk, plan$drone)
   (tens of GB) is deleted once its mosaics are made (`keep_projects = TRUE` keeps them).
 * **Images on a network drive**: ODM reads each image several times; `stage_dir = "E:/stage"` copies the images of
   each chunk to a local disk before processing it, and deletes them afterwards.
-* **Memory**: if a chunk fails for lack of memory, reduce the number of dates per chunk (`chunk_size = 6`, for a
-  new plan: `plan_mosaics(..., overwrite = TRUE)`).
+* **Processors and memory**: with `n_cores = "auto"`, ODM uses the processors minus a few left free for the
+  computer, but no more threads than the memory allows: the dense matching needs about 1.5 GB per thread (75 % of
+  the RAM is used at most, option `max_memory_gb`). For example 16 threads on a laptop with 28 processors and 32 GB,
+  49 on a server with 64 processors and 99 GB. The choice is printed (`ODM threads: ...`). If the dense matching
+  still runs out of memory (GPU memory of a laptop, for instance), the date is automatically processed again on the
+  processor with half of the threads (same result, slower). Further options: `n_cores = 8`, or
+  `downscale_factor_depth_map = 4` (depth maps at 1/4 of the image size: 0.5 GB per thread, less detailed surface),
+  or fewer dates per chunk (`chunk_size = 6`; for a new plan: `plan_mosaics(..., overwrite = TRUE)`).
 * **Time**: indicatively, 3 dates (133 images, 45 ha) take about 2.5 h with ODM on a workstation with an NVIDIA GPU
   (Metashape: under 1 h). Without an NVIDIA GPU, ODM is 3 to 4 times slower.
 * **Some chunks only**: `chunks = c("chunk_001", "chunk_002")`, for example to share the work between computers
