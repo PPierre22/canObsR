@@ -53,6 +53,25 @@
 
 .ascii_no_space <- function(p) !grepl("[^!-~]", p)
 
+# Downloads url (or its mirrors) to dest. libcurl first; on Windows, then "wininet", which uses the proxy
+# settings of Windows (libcurl ignores them: frequent cause of failures on institutional networks).
+# Returns TRUE/FALSE; the reasons of the failures are written in the log.
+.download <- function(urls, dest, min_size = 1e6) {
+   old <- options(timeout = max(3600, getOption("timeout"))); on.exit(options(old), add = TRUE)
+   methods <- c("libcurl", if (.is_windows()) "wininet")
+   for (u in urls) for (m in methods) {
+      ok <- tryCatch(suppressWarnings(utils::download.file(u, dest, mode = "wb", quiet = TRUE, method = m)) == 0,
+                     error = function(e) {
+                        log <- getOption("canObsR.setup_log")
+                        if (!is.null(log)) cat("download failed (", m, "): ", u, ": ", conditionMessage(e), "\n",
+                                               file = log, append = TRUE, sep = "")
+                        FALSE
+                     })
+      if (ok && file.exists(dest) && file.size(dest) >= min_size) return(TRUE)
+   }
+   FALSE
+}
+
 # ---- conda ------------------------------------------------------------------------------------------
 # conda executable (conda.exe on Windows, not conda.bat: it can be run without a shell)
 .conda_exe <- function(p) {
@@ -105,9 +124,7 @@
    url <- paste0("https://github.com/conda-forge/miniforge/releases/latest/download/", file)
    inst <- file.path(tempdir(), file)
    .say("info", "download of ", url, " (~90 MB)")
-   old <- options(timeout = max(1800, getOption("timeout"))); on.exit(options(old), add = TRUE)
-   ok <- tryCatch(utils::download.file(url, inst, mode = "wb", quiet = TRUE) == 0, error = function(e) FALSE)
-   if (!ok || !file.exists(inst) || file.size(inst) < 1e7) {
+   if (!.download(url, inst, 1e7)) {
       .say("ko", "download of Miniforge failed (no internet access, proxy, firewall?)")
       .say("info", "Download it by hand from https://conda-forge.org/download/ , install it (\"Just Me\"), then run ",
            "canobs_setup(conda = \"<miniforge folder>/", if (os == "Windows") "Scripts/conda.exe" else "bin/conda", "\")")
@@ -439,11 +456,15 @@ canobs_install_metashape <- function(version = .metashape_tested, wheel = NULL) 
    if (grepl("^https?://", wheel)) {
       dest <- file.path(tempdir(), basename(wheel))
       .say("info", "download of ", wheel, " (~150 MB)...")
-      o2 <- options(timeout = max(3600, getOption("timeout"))); on.exit(options(o2), add = TRUE)
-      ok <- tryCatch(utils::download.file(wheel, dest, mode = "wb", quiet = TRUE) == 0, error = function(e) FALSE)
-      if (!ok || file.size(dest) < 1e7)
-         stop("Download failed. Download the Python 3 module by hand from https://www.agisoft.com/downloads/installer/ ",
-              "then: canobs_install_metashape(wheel = \"<path of the .whl file>\")", call. = FALSE)
+      # download.agisoft.com is an alias of this Amazon S3 bucket (older download links of Agisoft)
+      mirror <- sub("^https://download\\.agisoft\\.com/", "https://s3-eu-west-1.amazonaws.com/download.agisoft.com/", wheel)
+      if (!.download(unique(c(wheel, mirror)), dest, 1e7)) {
+         .say("ko", "agisoft.com cannot be reached from R on this computer (network filter, proxy?).")
+         .say("info", "1. open https://www.agisoft.com/downloads/installer/ in your web browser, section of version ",
+              version, ", 'Python 3 Module', your system;")
+         .say("info", "2. then: canObsR::canobs_install_metashape(wheel = \"<path of the downloaded .whl file>\")")
+         stop("Download of the Metashape module failed.", call. = FALSE)
+      }
       wheel <- dest
    }
    if (!file.exists(wheel)) stop("File not found: ", wheel, call. = FALSE)
@@ -506,9 +527,7 @@ canobs_install_metashape <- function(version = .metashape_tested, wheel = NULL) 
    url <- sprintf("https://github.com/OpenDroneMap/ODM/releases/download/v%s/ODM_Setup_%s.exe", version, version)
    inst <- file.path(tempdir(), basename(url))
    .say("info", "download of ", url, " (245 MB)...")
-   old <- options(timeout = max(3600, getOption("timeout"))); on.exit(options(old), add = TRUE)
-   ok <- tryCatch(utils::download.file(url, inst, mode = "wb", quiet = TRUE) == 0, error = function(e) FALSE)
-   if (!ok || !file.exists(inst) || file.size(inst) < 1e8)
+   if (!.download(url, inst, 1e8))
       stop("Download of ODM failed (internet, proxy?). Download ", url, " by hand, install it in ", dir,
            ", then run canObsR::canobs_setup().", call. = FALSE)
    .say("info", "installation of ODM ", version, " in ", dir, " (5-10 min). If Windows asks for permission to install ",
