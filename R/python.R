@@ -83,7 +83,8 @@ canobs_config <- function() {
    args <- args[!vapply(args, is.null, TRUE)]
    fa <- tempfile("canobs_args_", fileext = ".json"); fr <- tempfile("canobs_res_", fileext = ".json")
    on.exit(unlink(c(fa, fr)), add = TRUE)
-   jsonlite::write_json(args, fa, auto_unbox = TRUE, null = "null", na = "null", digits = NA)
+   if (length(args)) jsonlite::write_json(args, fa, auto_unbox = TRUE, null = "null", na = "null", digits = NA)
+   else writeLines("{}", fa)
    # output also written to the log file set by generate_mosaics() / align_mosaics() (option canobsR.call_log)
    res <- .canobs_python(c("-m", "canobspy", "call", module, fun, fa, fr), echo = .echo, log = getOption("canobsR.call_log"))
    if (!file.exists(fr)) {

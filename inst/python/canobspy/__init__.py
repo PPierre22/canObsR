@@ -13,7 +13,7 @@ import importlib
 
 __version__ = "0.9.0.9000"  # same version as the R package canobsR
 
-_SUBMODULES = ("flights", "timesift_odm", "timesift_metashape", "compare", "selftest", "align")
+_SUBMODULES = ("flights", "timesift_odm", "timesift_metashape", "compare", "selftest", "align", "aggregate")
 
 
 def __getattr__(name):

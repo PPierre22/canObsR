@@ -1,6 +1,7 @@
 .align_options <- list(ref_resolution = 0.5, min_ref_coverage = 0.9, grid_res = 200L, window_size = 200L,
                        max_shift = 60L, max_iter = 100L, n_cores = NULL, min_points = 10L, resampling = "cubic",
-                       overwrite = FALSE, on_error = "continue", epochs = NULL)
+                       overwrite = FALSE, on_error = "continue", epochs = NULL,
+                       plan = NULL, share_by_chunk = TRUE, max_candidates = 3L)
 
 #' Co-register a series of orthomosaics
 #'
@@ -33,7 +34,15 @@
 #'   AROSICS parameters `grid_res` (200: distance between tie points, in pixels of the mosaic), `window_size` (200:
 #'   matching window, pixels), `max_shift` (60 pixels), `max_iter` (100), `n_cores` (processes; default
 #'   min(processors, 16)), `min_points` (10: fewer valid tie points = failure), `resampling` ("cubic"); `overwrite`
-#'   (FALSE), `on_error` ("continue" or "stop"), `epochs` (names of the mosaics to align, default all).
+#'   (FALSE), `on_error` ("continue" or "stop"), `epochs` (names of the mosaics to align, default all),
+#'   `share_by_chunk` (TRUE: one measure of the shifts per Time-SIFT chunk and reference, see Details), `plan`
+#'   (`plan.csv` of [generate_mosaics()]; default: next to `mosaics_dir`), `max_candidates` (3).
+#' @details
+#' **One transformation per chunk.** The mosaics of a Time-SIFT chunk of [generate_mosaics()] have the same geometry.
+#' When its `plan.csv` is found (in the parent folder of `mosaics_dir`), the shifts are measured once per chunk and
+#' reference, on the mosaic of the chunk covering the largest area (or the next ones, up to `max_candidates`, if it
+#' fails), and applied to the other mosaics of the chunk: as many measures as chunks instead of dates. Column
+#' `transform_from` of the journal: the mosaic on which the shifts were measured.
 #' @return Invisibly, the journal: a data.frame with one row per mosaic (`epoch`, `date`, `file`, `reference`,
 #'   `status`: "anchor", "done" or "failed", `n_points`, `shift_x_m`, `shift_y_m`, `shift_max_m`, `coverage_ha`,
 #'   `seconds`, `message`).
@@ -73,6 +82,11 @@ align_mosaics <- function(mosaics_dir, out_dir, mode = c("previous", "fixed", "n
    args <- c(list("align", "align_series", mosaics_dir = np(mosaics_dir), out_dir = np(out_dir), mode = mode,
                   reference = np(reference)), opt)
    if (!is.null(opt$epochs)) args$epochs <- as.list(opt$epochs)
+   # plan of generate_mosaics(): next to the mosaics folder (out_dir/plan.csv, mosaics in out_dir/orthomosaics)
+   if (is.null(opt$plan)) {
+      p <- file.path(dirname(normalizePath(mosaics_dir, winslash = "/")), "plan.csv")
+      if (file.exists(p)) args$plan <- p
+   } else args$plan <- np(opt$plan)
    rows <- do.call(.canobs_call, args)
    jr <- do.call(rbind, lapply(rows, function(r) as.data.frame(lapply(r, function(v) if (is.null(v)) NA else v),
                                                             stringsAsFactors = FALSE)))

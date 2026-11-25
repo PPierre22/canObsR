@@ -37,6 +37,7 @@ reference:
 - title: Co-registration
   contents:
   - align_mosaics
-- title: Utilities
+- title: Lighter mosaics and spectral indices
   contents:
-  - create_files_architecture
+  - aggregate_mosaics
+  - rgb_indices

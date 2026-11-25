@@ -1,0 +1,82 @@
+---
+title: "Lighter mosaics and spectral indices"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Lighter mosaics and spectral indices}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+A 5 cm mosaic of 300 ha weighs several GB: one date is slow to display, a whole series cannot be stacked.
+`aggregate_mosaics()` makes, for each mosaic, a version at 0.5 m (or any other resolution) with the bands R, G, B
+and, if asked, RGB spectral indices, all on the same grid.
+
+```{r}
+library(canobsR)
+aggregate_mosaics("D:/bouamir/3_aligned", "D:/bouamir/4_mosaics_50cm",
+                  indices = c("GCC", "RCC", "BCC", "GLI", "VARI", "NDYI"))
+```
+
+```
+10 mosaics -> D:/bouamir/4_mosaics_50cm: 0.5 m, bands R, G, B, GCC, RCC, BCC, GLI, VARI, NDYI; common grid 1850 x 1720 m
+[1/10] 20220427_50cm.tif: 287.4 ha, 212 s; remaining about 32 min
+...
+```
+
+## What is in the files
+
+* `out_dir/<mosaic name>_50cm.tif` (`_1m` at 1 m, ...): float32, one band per variable, **named** (`R`, `G`, `B`,
+  then the indices in the order asked).
+* Each value is the **mean of the pixels of the mosaic in the cell**. The indices are computed on each pixel (5 cm),
+  then averaged: the mean of the index, not the index of the mean colour (they differ where the cell mixes crowns,
+  gaps and shadows).
+* **One grid for all the dates**, aligned on multiples of the resolution and covering all the mosaics: the dates
+  overlay exactly, and the whole series can be stacked:
+
+```{r}
+f <- list.files("D:/bouamir/4_mosaics_50cm", pattern = "_50cm\\.tif$", full.names = TRUE)
+s <- terra::rast(f)                               # all dates, all bands
+gcc <- s[names(s) == "GCC"]                       # one layer per date
+names(gcc) <- substr(basename(f), 1, 8)
+```
+
+* The background of the mosaics (white, or black, in the 3 bands) is no data; a cell is no data (NaN) when less
+  than half of it is covered by the mosaic (`min_coverage`).
+* Run it again after new dates: the mosaics already done are skipped (`overwrite = TRUE` makes them again).
+  New dates that extend the site enlarge the common grid: the alignment of the cells is the same, but the files of
+  the earlier dates then have a smaller extent (`terra::extend()` before stacking, or `overwrite = TRUE`).
+
+## The indices
+
+```{r}
+rgb_indices()
+```
+
+| Name | Formula | Reference |
+|---|---|---|
+| GCC, RCC, BCC | G, R, B / (R + G + B) (chromatic coordinates) | Richardson et al. 2007 |
+| ExG | 2g - r - b | Woebbecke et al. 1995 |
+| ExR | 1.4r - g | Meyer et al. 1998 |
+| ExGR | ExG - ExR | Meyer & Neto 2008 |
+| GLI | (2G - R - B) / (2G + R + B) | Louhaichi et al. 2001 |
+| VARI | (G - R) / (G + R - B), bounded to [-1, 1] | Gitelson et al. 2002 |
+| NGRDI | (G - R) / (G + R) | Tucker 1979 |
+| NDYI | (G - B) / (G + B) | Sulik & Long 2016 |
+| MGRVI | (G² - R²) / (G² + R²) | Bendig et al. 2015 |
+| RGBVI | (G² - R B) / (G² + R B) | Bendig et al. 2015 |
+| TGI | G - 0.39 R - 0.61 B | Hunt et al. 2013 |
+| CIVE | 0.441 R - 0.811 G + 0.385 B + 18.787 | Kataoka et al. 2003 |
+| VEG | G / (R^0.667 B^0.333) | Hague et al. 2006 |
+| BI | sqrt((R² + G² + B²) / 3) (brightness) | |
+| SAT | (max - min) / max of R, G, B (saturation) | |
+
+R, G, B are the digital numbers (0-255) of the mosaic; r, g, b the chromatic coordinates. `indices = "all"` adds
+all of them. Pixels where an index is undefined (division by zero) are left out of the mean of that index only.
+
+The colour calibration made by `generate_mosaics()` (white balance per image, vignetting) makes the indices of the
+dates of a chunk comparable; between chunks, the colours can still differ slightly (light, season): indices that
+are ratios (GCC, NDYI, ...) are the least sensitive to it.

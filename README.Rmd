@@ -36,6 +36,7 @@ library(canobsR)
 check_flights("D:/site/1_flights")                                  # one subfolder per flight: RGB_20250101, ...
 generate_mosaics("D:/site/1_flights", "D:/site/2_mosaics")          # one orthomosaic per date (Time-SIFT, chunks)
 align_mosaics("D:/site/2_mosaics/orthomosaics", "D:/site/3_aligned") # co-registration (AROSICS)
+aggregate_mosaics("D:/site/3_aligned", "D:/site/4_mosaics_50cm", indices = c("GCC", "VARI"))  # 50 cm + indices
 ```
 
 Both processing functions are made for long series (hundreds of dates, hundreds of hectares at 5 cm) on one
@@ -47,6 +48,8 @@ progress and errors, and process new flights as they come.
 * [Installation](https://umr-amap.github.io/canobsR/articles/Installation-guide.html)
 * [Orthomosaics of a long series of flights](https://umr-amap.github.io/canobsR/articles/Generate-orthomosaics.html)
 * [Co-registration of a series of orthomosaics](https://umr-amap.github.io/canobsR/articles/Align-orthomosaics.html)
+* [Lighter mosaics and spectral indices](https://umr-amap.github.io/canobsR/articles/Aggregate-mosaics.html)
+* [Lighter mosaics and spectral indices](https://umr-amap.github.io/canobsR/articles/Aggregate-mosaics.html)
 
 ## Citation
 

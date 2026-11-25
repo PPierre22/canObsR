@@ -56,6 +56,11 @@ def _versions():
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    try:                                   # GDAL errors as Python exceptions (and no FutureWarning of GDAL 4)
+        from osgeo import gdal
+        gdal.UseExceptions()
+    except Exception:  # noqa: BLE001 - GDAL is checked by canobs_setup()
+        pass
     cmd = argv[0] if argv else "info"
     if cmd == "info":
         print(json.dumps(_versions()))
@@ -78,7 +83,8 @@ def main(argv=None):
             res = fun(**kwargs)
             out = {"ok": True, "result": res}
         except BaseException as e:  # noqa: BLE001 - the error is sent back to R
-            traceback.print_exc()
+            if not isinstance(e, (ValueError, FileNotFoundError)):    # errors of use: the message is enough
+                traceback.print_exc()
             out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
         with open(result_file, "w", encoding="utf-8") as f:
             json.dump(out, f, default=str)

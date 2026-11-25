@@ -20,26 +20,42 @@ hundreds, with `generate_mosaics()`. It assumes canobsR is installed (`vignette(
 positions of several dates **together**, in one photogrammetric block: the mosaics of these dates are then
 consistent with each other, without ground control points. A block of 100 dates would not fit in memory, so the
 dates are processed by **chunks** of about ten dates; the small shifts left between chunks are corrected afterwards
-by `align_mosaics()` (`vignette("Align-orthomosaics")`).
+by `align_mosaics()` (`vignette("Align-orthomosaics")`), and `aggregate_mosaics()` makes light 50 cm
+versions with spectral indices (`vignette("Aggregate-mosaics")`).
 
 ## 1. Organise the flights
 
-One folder per site, with one subfolder per flight, named `<prefix>_<YYYYMMDD>[_<drone>]`:
+canobsR finds the date and the drone of each flight **in the name of its folder**: this is the only convention
+to follow. A site is organised as follows (the folders after `1_flights` are made by canobsR; the names are
+suggestions):
 
 ```
-D:/bouamir/1_flights/
-  RGB_20220427/                 flight of the main drone of the site
-  RGB_20220511/
-  RGB_20220525/
-  RGB_20220525_Matrice4E/       same day, another drone: a separate mosaic
-  ...
+D:/bouamir/                          one folder per site
+  1_flights/                         flights_dir: one subfolder per flight
+    RGB_20220427/                    <prefix>_<YYYYMMDD>: flight of the main drone of the site
+      DJI_0001.JPG ...               images (subfolders allowed)
+    RGB_20220511/
+    RGB_20220525/
+    RGB_20220525_Matrice4E/          <prefix>_<YYYYMMDD>_<drone>: flight of another drone
+    notes/                           no date in the name: ignored
+  2_mosaics/                         out_dir of generate_mosaics()
+    orthomosaics/                    20220427.tif, 20220511.tif, ..., 20220525_Matrice4E.tif
+    plan.csv, journal.csv, logs/ ...
+  3_aligned/                         out_dir of align_mosaics()
+  4_mosaics_50cm/                    out_dir of aggregate_mosaics()
 ```
 
-* The date in the folder name is the date of the mosaic, whatever the EXIF dates of the images (a flight
-  interrupted by rain and finished the next day stays one mosaic).
-* The optional suffix names the drone. Without suffix, the flight is from the main drone of the site. Each date and
-  drone gives one mosaic: `20220525.tif` and `20220525_Matrice4E.tif`.
-* Images can be in subfolders of the flight folder. Folders without a date (e.g. `notes`) are ignored.
+Rules of the flight folder names:
+
+* **Date**: `YYYYMMDD` (or `YYYYMM` for monthly series) anywhere in the name; the prefix (`RGB`, `MS`, the site
+  name...) is free. The date of the folder is the date of the mosaic, whatever the EXIF dates of the images (a
+  flight interrupted by rain and finished the next day stays one mosaic).
+* **Drone**: what follows the date names the drone (`_Matrice4E`, `_M3T`...). **No suffix = the main drone of the
+  site** (for example the Mavic 2 Pro used since the start of the series): there is nothing to rename in an
+  existing series. Each date and drone gives one mosaic, named `<date>[_<drone>]`: two drones flown the same day
+  give `20220525.tif` and `20220525_Matrice4E.tif`.
+* One folder per flight. Two folders with the same date and drone (e.g. a site flown in two parts) make one mosaic.
+* Avoid spaces and accents in the paths (some photogrammetry tools fail with them).
 
 ## 2. Check the flights
 

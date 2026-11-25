@@ -28,6 +28,21 @@ For each mosaic (the *target*):
 3. the shifts, interpolated between the points, are **applied to the whole target**, at its own resolution: the
    aligned mosaic is written in `out_dir`, with the same file name.
 
+## One transformation per chunk
+
+The mosaics of one Time-SIFT chunk of `generate_mosaics()` have the same geometry: the same shifts align them all
+on a given reference. When the mosaics come from `generate_mosaics()` (its `plan.csv` is found next to the
+`orthomosaics` folder), `align_mosaics()` therefore measures the shifts **once per chunk and per reference**, on the
+mosaic of the chunk that covers the largest area (if it fails, on the next one, up to 3), and applies them to the
+other mosaics of the chunk. Measuring the shifts is the longest step: a series of 100 dates in 11 chunks needs 11
+measures instead of 100.
+
+This is only valid for mosaics of the **same chunk** aligned on the **same reference**: in mode `"nearest"`, the
+mosaics of a chunk with different nearest references get one measure per reference; mosaics not in the plan are
+measured one by one. The column `transform_from` of the journal gives, for each mosaic, the mosaic on which its
+shifts were measured. `share_by_chunk = FALSE` measures every mosaic (for example to check that a chunk is
+consistent); `plan = "..."` gives the plan when it is elsewhere.
+
 ## Mode `"previous"`: each date on the one before (default)
 
 ```{r}
@@ -35,9 +50,10 @@ library(canobsR)
 align_mosaics("D:/bouamir/2_mosaics/orthomosaics", "D:/bouamir/3_aligned")
 ```
 
-The mosaics are taken in chronological order (date in the file name). The first one is the **anchor** of the series:
-it is copied as it is. Each next mosaic is aligned on the **last mosaic already aligned** that covers at least 90 %
-of the site (of the largest mosaic): a partial flight is aligned, but is not used as a reference. The whole series is
+The mosaics are taken in chronological order (date in the file name; with one transformation per chunk, the chunks
+in the order of their measured mosaics). The first one is the **anchor** of the series: it is copied as it is (with
+the mosaics of its chunk). Each next mosaic is aligned on the **last mosaic already aligned** that covers at least
+90 % of the site (of the largest mosaic): a partial flight is aligned, but is not used as a reference. The whole series is
 thus brought onto the geometry of the first date, step by step, each date being compared with a recent one (similar
 vegetation, similar light).
 
@@ -74,8 +90,8 @@ long series with one reference per year or per season.
 
 ## Results, interruptions, failures
 
-In `out_dir`: the aligned mosaics, `align_journal.csv`, `tie_points/` (the tie points of each mosaic: position,
-shift, reliability) and `_references/` (the grey 0.5 m references, kept to save time when running again).
+In `out_dir`: the aligned mosaics, `align_journal.csv`, `tie_points/` (the tie points of each measure: position,
+shift, reliability), `transforms/` (the shifts measured, applied to the other mosaics of the chunk) and `_references/` (the grey 0.5 m references, kept to save time when running again).
 
 ```{r}
 j <- read.csv("D:/bouamir/3_aligned/align_journal.csv")
@@ -104,3 +120,6 @@ Advanced options of `align_mosaics()` (see `?align_mosaics`), with the values us
 | `n_cores` | min(processors, 16) | parallel processes (each one needs memory: reduce it if the computer runs out of memory) |
 | `min_points` | 10 | fewer reliable tie points: failure |
 | `epochs` | all | names of the mosaics to align, e.g. `c("20220427", "20220511")` |
+| `share_by_chunk` | TRUE | one measure per chunk and reference (needs `plan.csv`) |
+| `plan` | found | `plan.csv` of `generate_mosaics()` |
+| `max_candidates` | 3 | mosaics of a chunk tried in turn if the measure fails |

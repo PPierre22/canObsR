@@ -26,7 +26,9 @@ align_mosaics(
 AROSICS parameters \code{grid_res} (200: distance between tie points, in pixels of the mosaic), \code{window_size} (200:
 matching window, pixels), \code{max_shift} (60 pixels), \code{max_iter} (100), \code{n_cores} (processes; default
 min(processors, 16)), \code{min_points} (10: fewer valid tie points = failure), \code{resampling} ("cubic"); \code{overwrite}
-(FALSE), \code{on_error} ("continue" or "stop"), \code{epochs} (names of the mosaics to align, default all).}
+(FALSE), \code{on_error} ("continue" or "stop"), \code{epochs} (names of the mosaics to align, default all),
+\code{share_by_chunk} (TRUE: one measure of the shifts per Time-SIFT chunk and reference, see Details), \code{plan}
+(\code{plan.csv} of \code{\link[=generate_mosaics]{generate_mosaics()}}; default: next to \code{mosaics_dir}), \code{max_candidates} (3).}
 }
 \value{
 Invisibly, the journal: a data.frame with one row per mosaic (\code{epoch}, \code{date}, \code{file}, \code{reference},
@@ -54,6 +56,13 @@ on the closest one in time, before or after (the one before if two are as close)
 Like \code{\link[=generate_mosaics]{generate_mosaics()}}, it can be stopped and run again: \code{out_dir/align_journal.csv} records each mosaic as soon
 as it is aligned (reference, number of tie points, median shift), and the failed mosaics are retried. The tie
 points of each mosaic are saved in \verb{out_dir/tie_points/} and the grey references in \verb{out_dir/_references/}.
+}
+\details{
+\strong{One transformation per chunk.} The mosaics of a Time-SIFT chunk of \code{\link[=generate_mosaics]{generate_mosaics()}} have the same geometry.
+When its \code{plan.csv} is found (in the parent folder of \code{mosaics_dir}), the shifts are measured once per chunk and
+reference, on the mosaic of the chunk covering the largest area (or the next ones, up to \code{max_candidates}, if it
+fails), and applied to the other mosaics of the chunk: as many measures as chunks instead of dates. Column
+\code{transform_from} of the journal: the mosaic on which the shifts were measured.
 }
 \examples{
 \dontrun{
