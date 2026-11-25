@@ -10,13 +10,13 @@
 # between dates better than "chunk" (which harmonises the colours between dates)?
 # =====================================================================================================
 
-lib_dev <- "D:/canObsR/Rlib_dev"
-library(canObsR, lib.loc = lib_dev)
+lib_dev <- "D:/canobsR/Rlib_dev"
+library(canobsR, lib.loc = lib_dev)
 library(reticulate)
 library(terra)
 use_condaenv("C:/ProgramData/miniconda3/envs/arosics", required = TRUE)
 
-my_path   <- "D:/canObsR/data/canObsR_data/canObsR_data"
+my_path   <- "D:/canobsR/data/canobsR_data/canobsR_data"
 path_in   <- file.path(my_path, "1_my_drone_data")
 bench_dir <- file.path(my_path, "benchmark3")
 odm_path  <- "C:/ODM/run.bat"

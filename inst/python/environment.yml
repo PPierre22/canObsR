@@ -1,4 +1,4 @@
-# Python environment of canObsR / canobspy (created by canObsR::canobs_setup()).
+# Python environment of canobsR / canobspy (created by canobsR::canobs_setup()).
 # Short list on purpose: conda-forge resolves the dependencies for each system (Windows, macOS, Linux).
 name: canobs
 channels:

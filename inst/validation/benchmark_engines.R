@@ -7,17 +7,17 @@
 # - GPU usage is logged every 5 s with nvidia-smi during each run (gpu_usage_<engine>.csv);
 # - the console output is also written to console_<engine>.txt (times of each step for Metashape);
 # - everything is written in bench_dir; temporary files and ODM projects stay on D:.
-# - canObsR >= 0.0.0.9012: the two engines are set to do the same processing (see ENGINES.md in the package):
+# - canobsR >= 0.0.0.9012: the two engines are set to do the same processing (see ENGINES.md in the package):
 #   use a new bench_dir (the ODM project of an older version cannot be resumed).
 # =====================================================================================================
 
-lib_dev <- "D:/canObsR/Rlib_dev"
-# install.packages("D:/canObsR/canObsR_0.0.0.9012_odm.tar.gz", repos = NULL, type = "source", lib = lib_dev)  # once, R restarted
-library(canObsR, lib.loc = lib_dev)
+lib_dev <- "D:/canobsR/Rlib_dev"
+# install.packages("D:/canobsR/canobsR_0.0.0.9012_odm.tar.gz", repos = NULL, type = "source", lib = lib_dev)  # once, R restarted
+library(canobsR, lib.loc = lib_dev)
 library(reticulate)
 use_condaenv("C:/ProgramData/miniconda3/envs/arosics", required = TRUE)   # with Metashape API and arosics
 
-my_path   <- "D:/canObsR/data/canObsR_data/canObsR_data"
+my_path   <- "D:/canobsR/data/canobsR_data/canobsR_data"
 path_in   <- file.path(my_path, "1_my_drone_data")
 bench_dir <- file.path(my_path, "benchmark3")                # everything produced by the benchmark goes here
 odm_path  <- "C:/ODM/run.bat"
@@ -98,7 +98,7 @@ read_gpu <- function(f) {
    x[!is.na(x$time), ]
 }
 steps <- NULL
-# Metashape: "Time ... : <s> seconds" lines printed by the canObsR Metashape pipeline
+# Metashape: "Time ... : <s> seconds" lines printed by the canobsR Metashape pipeline
 f_con <- file.path(dir_out, "console_Metashape.txt")
 if (file.exists(f_con)) {
    l <- grep("^Time .*: *[0-9.]+ seconds", readLines(f_con, warn = FALSE), value = TRUE)
@@ -159,6 +159,6 @@ grid <- do.call(rbind, lapply(c(dir_ref, dir_odm), function(d) {
 if (!is.null(grid)) { write.csv(grid, file.path(dir_out, "grids_engines.csv"), row.names = FALSE); print(grid, row.names = FALSE) }
 
 # ---- 4. comparison of the mosaics (uses dir_ref, dir_odm, dir_out defined above) ----------------
-py_file <- "D:/canObsR/compare_engines.py"
+py_file <- "D:/canobsR/compare_engines.py"
 tmp_dir <- file.path(bench_dir, "tmp_compare")
-source("D:/canObsR/compare_Mosa_engines.R")
+source("D:/canobsR/compare_Mosa_engines.R")

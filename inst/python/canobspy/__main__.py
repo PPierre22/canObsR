@@ -1,5 +1,5 @@
 """
-Command line of canobspy, used by the R package canObsR (it runs Python in a separate process, never inside R).
+Command line of canobspy, used by the R package canobsR (it runs Python in a separate process, never inside R).
 
     python -m canobspy info                          versions of Python, canobspy, numpy, GDAL, AROSICS (JSON)
     python -m canobspy selftest                      AROSICS finds a known shift between two synthetic images

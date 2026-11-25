@@ -7,7 +7,7 @@
 canobs_install_metashape(version = .metashape_tested, wheel = NULL)
 }
 \arguments{
-\item{version}{character. Version of the module. Default: the version tested with canObsR.}
+\item{version}{character. Version of the module. Default: the version tested with canobsR.}
 
 \item{wheel}{character. Instead of \code{version}: path or URL of a \code{.whl} file already downloaded.}
 }
@@ -16,16 +16,16 @@ Invisibly, the version of the installed module.
 }
 \description{
 Only needed by \code{generate_Mosa(engine = "metashape")}. Downloads the Python module of Metashape (a \code{.whl} file of
-\url{https://www.agisoft.com/downloads/installer/}), installs it in the Python environment of canObsR and checks
+\url{https://www.agisoft.com/downloads/installer/}), installs it in the Python environment of canobsR and checks
 that a licence is activated. The module needs a \strong{Metashape Professional 2.x licence activated on the computer}
 (in the Metashape application: \emph{Help > Activate product}); a 2.x licence works with every 2.x version, so the
 module can be more recent than the installed application.
 
-Modules before 2.3 do not support the Python 3.12 of canObsR on Windows.
+Modules before 2.3 do not support the Python 3.12 of canobsR on Windows.
 }
 \examples{
 \dontrun{
-canObsR::canobs_install_metashape()
-canObsR::canobs_install_metashape(wheel = "D:/downloads/metashape-2.3.2-cp39.cp310.cp311.cp312.cp313-none-win_amd64.whl")
+canobsR::canobs_install_metashape()
+canobsR::canobs_install_metashape(wheel = "D:/downloads/metashape-2.3.2-cp39.cp310.cp311.cp312.cp313-none-win_amd64.whl")
 }
 }

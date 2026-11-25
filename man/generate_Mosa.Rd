@@ -11,7 +11,7 @@ generate_Mosa(
   out_dir_project = NULL,
   data_type = "RGB",
   resol_ref = 0.05,
-  crs = "EPSG::32622",
+  crs = "auto",
   site_name = "",
   calibrate_col = TRUE,
   sun_sensor = FALSE,
@@ -28,7 +28,7 @@ generate_Mosa(
   odm_args = NULL,
   overwrite = FALSE,
   check_dates = TRUE,
-  tempdir_custom = getOption("canObsR.tempdir", NULL),
+  tempdir_custom = getOption("canobsR.tempdir", NULL),
   keypoint_limit = NULL,
   tiepoint_limit = 10000L,
   calibrate_vignetting = TRUE,
@@ -48,7 +48,8 @@ generate_Mosa(
 
 \item{resol_ref}{numeric. The resolution (in meters) used to generate DEMs and orthomosaics. Defaults to 0.05.}
 
-\item{crs}{character. Coordinate system used for the orthomosaic, in a string format. Example: crs="EPSG::32622" (default value).}
+\item{crs}{character. Coordinate system of the orthomosaics, e.g. \code{"EPSG:32633"}. \code{"auto"} (default): the WGS 84 / UTM
+zone of the site, found from the GPS positions of a few images of each folder.}
 
 \item{site_name}{character. Adds the data site name into the names of all created folders and files, to better separate generated data from different projects. If not specified, the names will stay generic.}
 
@@ -89,7 +90,7 @@ compared on exactly the same geometry. Give another \code{out_dir_ortho} to keep
 
 \item{engine}{character. Photogrammetry software used: "odm" (OpenDroneMap, default) or "metashape".}
 
-\item{odm_path}{character. Only for \code{engine = "odm"}. With \code{odm_runner = "native"}, path to the ODM launcher (\code{run.bat} on Windows, \code{run.sh} on Linux). By default, the option \code{canObsR.odm_path}, then the environment variable \code{ODM_PATH}, then \verb{C:/ODM/run.bat}. With "docker", name of the image (default "opendronemap/odm"). With "apptainer", path to the image file.}
+\item{odm_path}{character. Only for \code{engine = "odm"}. With \code{odm_runner = "native"}, path to the ODM launcher (\code{run.bat} on Windows, \code{run.sh} on Linux). By default, the option \code{canobsR.odm_path}, then the environment variable \code{ODM_PATH}, then \verb{C:/ODM/run.bat}. With "docker", name of the image (default "opendronemap/odm"). With "apptainer", path to the image file.}
 
 \item{odm_runner}{character. How ODM is launched: "native" (default), "docker" or "apptainer" (clusters).}
 
@@ -101,14 +102,14 @@ compared on exactly the same geometry. Give another \code{out_dir_ortho} to keep
 on another day than the folder date (information only, never an error).}
 
 \item{tempdir_custom}{character. Only for \code{engine = "odm"}. Directory for the temporary files (R terra, GDAL and ODM).
-Default: the option \code{canObsR.tempdir} if set (\code{options(canObsR.tempdir = "D:/tmp")}), otherwise a \verb{_tmp} folder in
+Default: the option \code{canobsR.tempdir} if set (\code{options(canobsR.tempdir = "D:/tmp")}), otherwise a \verb{_tmp} folder in
 \code{out_dir_project} (or in \code{out_dir_ortho}). Large temporary files are written during the post-processing of the
 orthomosaics: this folder should be on a disk with free space (not the system disk). A subfolder is created in it
 and deleted at the end.}
 
 \item{keypoint_limit}{integer. Number of keypoints detected per image for the alignment (Metashape \code{keypoint_limit};
 ODM \code{--min-num-features}, the number of features extracted per image). \code{NULL} (default): 100000 for Metashape
-(its pipeline) and 10000 for ODM. Tests on the canObsR data (3 dates): the co-registration between dates is the
+(its pipeline) and 10000 for ODM. Tests on the canobsR data (3 dates): the co-registration between dates is the
 same with 10000, 20000 or 100000 keypoints (2.2-2.3 cm), but ODM agrees locally with Metashape only with 100000
 (10 cm against about 38 cm), at the cost of an alignment 23 times longer (16 h instead of 41 min).
 With Metashape, the photos that are not aligned are matched again with twice this limit.}
@@ -137,7 +138,7 @@ The two engines are set to do the same processing as far as possible (same image
 keypoints, same accuracy of the GPS positions, depth maps at the same image resolution, colour calibration on the
 same tie points, products rendered at \code{resol_ref} in \code{crs}); the remaining differences come from the algorithms of
 each software (e.g. ODM detects the keypoints on images of 4480 px at most, and projects the images on a simplified
-2.5D mesh instead of a DEM). They are described in \code{system.file("ENGINES.md", package = "canObsR")} (in French).
+2.5D mesh instead of a DEM). They are described in \code{system.file("ENGINES.md", package = "canobsR")} (in French).
 
 With \code{engine = "odm"}:
 \itemize{
@@ -174,9 +175,7 @@ The Time-SIFT method is described in Feurer & Vinatier (2018) \doi{10.1016/j.isp
 generate_Mosa(path_in = "path_to_my_drone_data",
                out_dir_ortho = "my_output_folder/ORTHO",
                resol_ref = 0.05,
-               site_name = "Bouamir",
-               crs = "EPSG::32633",
-               odm_path = "C:/ODM/run.bat"
+               site_name = "Bouamir"
                )
 
 # With Metashape

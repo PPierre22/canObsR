@@ -3,24 +3,24 @@
 # =====================================================================================================
 # Questions:
 #   1. how many keypoints per image for ODM? 100 000 (= Metashape) took 16 h of alignment in benchmark3;
-#      tested here: 20 000 and 10 000, with all the other settings of canObsR 0.0.0.9014 and the GPU;
+#      tested here: 20 000 and 10 000, with all the other settings of canobsR 0.0.0.9014 and the GPU;
 #   2. does a denser mesh (--mesh-size) bring the ODM orthomosaics closer to Metashape? (ODM default 200 000
 #      vertices; tested 1 000 000 and 4 000 000, from the meshing step only).
-# Reference: the Metashape series of benchmark3 (canObsR 0.0.0.9012, same Metashape settings as before).
+# Reference: the Metashape series of benchmark3 (canobsR 0.0.0.9012, same Metashape settings as before).
 # Each ODM series is compared with it (AROSICS, sections A for ODM, B ODM vs Metashape, C colours).
 #
-# To run in a NEW R session, with canObsR_0.0.0.9014_odm.tar.gz, night_tests.R, compare_Mosa_engines.R,
-# compare_engines.py and colour_calibration_test.R in D:/canObsR:
-#   source("D:/canObsR/night_tests.R")
+# To run in a NEW R session, with canobsR_0.0.0.9014_odm.tar.gz, night_tests.R, compare_Mosa_engines.R,
+# compare_engines.py and colour_calibration_test.R in D:/canobsR:
+#   source("D:/canobsR/night_tests.R")
 # Every step is independent (an error is logged, the next step starts). A step is skipped when its expected
 # duration goes beyond `stop_by` (verzy is needed at 8:00). Everything is in <my_path>/benchmark4:
 #   night_log.txt (progress), night_summary.csv / night_summary.txt (one row per series), compare_*/summary.txt.
 # A step interrupted (crash, stop) is resumed by running the script again: finished ODM dates are skipped.
 # =====================================================================================================
 
-scripts  <- "D:/canObsR"
-lib_dev  <- "D:/canObsR/Rlib_dev"
-my_path  <- "D:/canObsR/data/canObsR_data/canObsR_data"
+scripts  <- "D:/canobsR"
+lib_dev  <- "D:/canobsR/Rlib_dev"
+my_path  <- "D:/canobsR/data/canobsR_data/canobsR_data"
 path_in  <- file.path(my_path, "1_my_drone_data")
 b3       <- file.path(my_path, "benchmark3")
 b4       <- file.path(my_path, "benchmark4")
@@ -37,14 +37,14 @@ log_line <- function(...) { m <- paste0(format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
                             cat(m, "\n", file = night_log, append = TRUE) }
 
 # ---- 0. package, GPU, disk -------------------------------------------------------------------------
-v <- tryCatch(as.character(packageVersion("canObsR", lib.loc = lib_dev)), error = function(e) "none")
+v <- tryCatch(as.character(packageVersion("canobsR", lib.loc = lib_dev)), error = function(e) "none")
 if (v != "0.0.0.9014") {
-   if ("canObsR" %in% loadedNamespaces()) stop("canObsR ", v, " is loaded: restart R and run this script again")
-   install.packages(file.path(scripts, "canObsR_0.0.0.9014_odm.tar.gz"), repos = NULL, type = "source", lib = lib_dev)
+   if ("canobsR" %in% loadedNamespaces()) stop("canobsR ", v, " is loaded: restart R and run this script again")
+   install.packages(file.path(scripts, "canobsR_0.0.0.9014_odm.tar.gz"), repos = NULL, type = "source", lib = lib_dev)
 }
-library(canObsR, lib.loc = lib_dev); library(reticulate); library(terra)
+library(canobsR, lib.loc = lib_dev); library(reticulate); library(terra)
 use_condaenv("C:/ProgramData/miniconda3/envs/arosics", required = TRUE)
-log_line("canObsR ", as.character(packageVersion("canObsR", lib.loc = lib_dev)), " - start, stop_by ", format(stop_by))
+log_line("canobsR ", as.character(packageVersion("canobsR", lib.loc = lib_dev)), " - start, stop_by ", format(stop_by))
 dummy <- "C:/ODM/SuperBuild/install/bin/nvcuda.dll"
 log_line("GPU: dummy nvcuda.dll next to OpenMVS: ", if (file.exists(dummy) && file.size(dummy) < 1e6)
          "PRESENT (generate_Mosa() will rename it)" else "absent (OpenMVS uses the GPU)")

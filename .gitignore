@@ -10,7 +10,7 @@ inst/xlsx/*
 utils.ipynb
 multiple_sites_auto.R
 inst/crowns/*
-inst/PYTHON/canObsR_env
+inst/PYTHON/canobsR_env
 test_data/*
 *.md
 pandoc*

@@ -1,10 +1,10 @@
 # =====================================================================================================
 # Long unattended run: GPU test of ODM, then benchmark3, colour calibration test, mesh density test
 # =====================================================================================================
-# To run in a NEW R session (Session > Restart R), with all the files in D:/canObsR:
-#   canObsR_0.0.0.9012_odm.tar.gz, sunday_run.R, odm_gpu_test.R, benchmark_engines.R, compare_Mosa_engines.R,
+# To run in a NEW R session (Session > Restart R), with all the files in D:/canobsR:
+#   canobsR_0.0.0.9012_odm.tar.gz, sunday_run.R, odm_gpu_test.R, benchmark_engines.R, compare_Mosa_engines.R,
 #   compare_engines.py, colour_calibration_test.R, odm_mesh_size_test.R
-#   source("D:/canObsR/sunday_run.R")
+#   source("D:/canobsR/sunday_run.R")
 # Each step is independent: if one fails, the error is written in the log and the next one starts.
 # Log: <my_path>/sunday_run_log.txt (start, end and duration of each step, errors).
 #
@@ -15,21 +15,21 @@
 #   4. ODM mesh density 1 M and 4 M vertices ...... ~1-2 h (meshing + texture + ortho), comparisons ~1 h
 # =====================================================================================================
 
-scripts  <- "D:/canObsR"
-lib_dev  <- "D:/canObsR/Rlib_dev"
-my_path  <- "D:/canObsR/data/canObsR_data/canObsR_data"
+scripts  <- "D:/canobsR"
+lib_dev  <- "D:/canobsR/Rlib_dev"
+my_path  <- "D:/canobsR/data/canobsR_data/canobsR_data"
 run_log  <- file.path(my_path, "sunday_run_log.txt")
 
 log_line <- function(...) { m <- paste0(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "  ", ...); message(m)
                             cat(m, "\n", file = run_log, append = TRUE) }
 
-# ---- 0. canObsR 0.0.0.9012 -----------------------------------------------------------------------
-v <- tryCatch(as.character(packageVersion("canObsR", lib.loc = lib_dev)), error = function(e) "none")
+# ---- 0. canobsR 0.0.0.9012 -----------------------------------------------------------------------
+v <- tryCatch(as.character(packageVersion("canobsR", lib.loc = lib_dev)), error = function(e) "none")
 if (v != "0.0.0.9012") {
-   if ("canObsR" %in% loadedNamespaces()) stop("canObsR ", v, " is loaded: restart R (Session > Restart R) and run this script again")
-   install.packages(file.path(scripts, "canObsR_0.0.0.9012_odm.tar.gz"), repos = NULL, type = "source", lib = lib_dev)
+   if ("canobsR" %in% loadedNamespaces()) stop("canobsR ", v, " is loaded: restart R (Session > Restart R) and run this script again")
+   install.packages(file.path(scripts, "canobsR_0.0.0.9012_odm.tar.gz"), repos = NULL, type = "source", lib = lib_dev)
 }
-log_line("canObsR ", as.character(packageVersion("canObsR", lib.loc = lib_dev)), " — start of the run")
+log_line("canobsR ", as.character(packageVersion("canobsR", lib.loc = lib_dev)), " — start of the run")
 
 step <- function(name, file) {
    t0 <- Sys.time()
@@ -45,7 +45,7 @@ step <- function(name, file) {
 step("1. GPU test of ODM", "odm_gpu_test.R")
 if (exists("gpu_fix_applied")) log_line("   GPU fix applied: ", gpu_fix_applied)
 
-# 2. both engines from scratch with canObsR 0.0.0.9012, then AROSICS comparison
+# 2. both engines from scratch with canobsR 0.0.0.9012, then AROSICS comparison
 step("2. benchmark3 (Metashape, ODM, comparison)", "benchmark_engines.R")
 
 # 3. colour calibration date by date, for both engines

@@ -1,7 +1,7 @@
 # =====================================================================================================
 # ODM: effect of the density of the surface used for the orthomosaics (--mesh-size)
 # =====================================================================================================
-# Metashape (canObsR pipeline) projects the images on a DEM at resol_ref (5 cm). ODM projects them on a 2.5D mesh
+# Metashape (canobsR pipeline) projects the images on a DEM at resol_ref (5 cm). ODM projects them on a 2.5D mesh
 # made from a DSM at about resol_ref, then simplified to at most --mesh-size vertices (ODM default: 200000, i.e. about
 # one vertex every 1.5 m on the 45 ha of the test data). On tree crowns, a coarser surface can move or blur the edges
 # of the crowns in the orthomosaic. This script runs ODM again from the meshing step only (same alignment, same point
@@ -11,13 +11,13 @@
 # Each value of mesh_sizes: meshing + texturing + orthomosaic of each date (no new SfM, no new dense matching).
 # =====================================================================================================
 
-lib_dev <- "D:/canObsR/Rlib_dev"
-library(canObsR, lib.loc = lib_dev)
+lib_dev <- "D:/canobsR/Rlib_dev"
+library(canobsR, lib.loc = lib_dev)
 library(reticulate)
 library(terra)
 use_condaenv("C:/ProgramData/miniconda3/envs/arosics", required = TRUE)
 
-my_path    <- "D:/canObsR/data/canObsR_data/canObsR_data"
+my_path    <- "D:/canobsR/data/canobsR_data/canobsR_data"
 path_in    <- file.path(my_path, "1_my_drone_data")
 bench_dir  <- file.path(my_path, "benchmark3")
 odm_path   <- "C:/ODM/run.bat"
@@ -37,12 +37,12 @@ for (m in mesh_sizes) {
 print(times, row.names = FALSE)
 
 # comparison with Metashape, for each series (same script as the benchmark)
-py_file <- "D:/canObsR/compare_engines.py"
+py_file <- "D:/canobsR/compare_engines.py"
 dir_ref <- file.path(bench_dir, "ortho_metashape")
 for (m in c(200000, mesh_sizes)) {
    dir_odm <- if (m == 200000) file.path(bench_dir, "ortho_odm") else file.path(bench_dir, paste0("ortho_odm_mesh", m))
    dir_out <- file.path(bench_dir, paste0("compare_mesh", m))
    tmp_dir <- file.path(bench_dir, "tmp_compare")
-   source("D:/canObsR/compare_Mosa_engines.R")
+   source("D:/canobsR/compare_Mosa_engines.R")
 }
 cat("\nSee compare_mesh*/summary.txt: shifts ODM vs Metashape for each mesh size.\n")

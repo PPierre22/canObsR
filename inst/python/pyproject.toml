@@ -16,7 +16,7 @@ dependencies = ["numpy", "pillow"]
 align = ["arosics"]
 
 [project.urls]
-Homepage = "https://github.com/umr-amap/canObsR"
+Homepage = "https://github.com/umr-amap/canobsR"
 
 [tool.setuptools]
 packages = ["canobspy"]

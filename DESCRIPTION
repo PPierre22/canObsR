@@ -1,4 +1,4 @@
-Package: canObsR
+Package: canobsR
 Title: Orthomosaics of Long Series of Drone Flights (Time-SIFT) and their Co-Registration
 Version: 0.9.0.9000
 Date: 2026-11-25
@@ -9,7 +9,7 @@ Authors@R: c(
 Description: Processing chain of the canobs drone observatories (<https://www.canobs.net>):
     multi-temporal orthomosaics of long series of drone flights with the Time-SIFT method
     (OpenDroneMap by default, or Agisoft Metashape), and their co-registration with AROSICS.
-    The processing is done by 'canobspy', a Python package shipped with canObsR and run in a
+    The processing is done by 'canobspy', a Python package shipped with canobsR and run in a
     separate conda environment that canobs_setup() installs.
 License: MIT + file LICENSE
 Encoding: UTF-8
@@ -30,5 +30,5 @@ Suggests:
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
 VignetteBuilder: knitr
-URL: https://umr-amap.github.io/canObsR/, https://github.com/umr-amap/canObsR/
-BugReports: https://github.com/umr-amap/canObsR/issues
+URL: https://umr-amap.github.io/canobsR/, https://github.com/umr-amap/canobsR/
+BugReports: https://github.com/umr-amap/canobsR/issues

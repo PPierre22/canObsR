@@ -9,7 +9,7 @@ canobs_install_odm(dir = "C:/ODM", version = .odm_tested, reinstall = FALSE)
 \arguments{
 \item{dir}{character. Installation folder (no spaces or accents). Default \verb{C:/ODM}, the folder of the installer.}
 
-\item{version}{character. Version of ODM. Default: the version used to test and set the defaults of canObsR.
+\item{version}{character. Version of ODM. Default: the version used to test and set the defaults of canobsR.
 \code{"latest"} for the latest release.}
 
 \item{reinstall}{logical. Installs even if ODM is already in \code{dir}.}
@@ -19,12 +19,12 @@ Invisibly, the path of \code{run.bat}.
 }
 \description{
 Downloads the Windows installer of \href{https://opendronemap.org}{OpenDroneMap} (ODM), the default photogrammetry
-engine of canObsR, installs it without administrator rights, records it in the configuration of canObsR and
+engine of canobsR, installs it without administrator rights, records it in the configuration of canobsR and
 checks whether it can use the NVIDIA GPU (see \code{\link[=canobs_setup]{canobs_setup()}}). On Linux and macOS, ODM runs with docker
 (\code{generate_Mosa(..., odm_runner = "docker")}): this function only says so.
 }
 \examples{
 \dontrun{
-canObsR::canobs_install_odm()
+canobsR::canobs_install_odm()
 }
 }

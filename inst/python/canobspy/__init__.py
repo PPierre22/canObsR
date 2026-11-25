@@ -2,7 +2,7 @@
 canobspy: processing chain of the canobs drone observatories (https://www.canobs.net).
 
 Time-SIFT orthomosaics of long series of drone flights (OpenDroneMap or Agisoft Metashape) and their
-co-registration with AROSICS. Used by the R package canObsR, or on its own (command line, scripts).
+co-registration with AROSICS. Used by the R package canobsR, or on its own (command line, scripts).
 
 Submodules are imported on demand, so that importing canobspy never requires Metashape, ODM or AROSICS:
     from canobspy import timesift_odm     # Time-SIFT with OpenDroneMap
@@ -11,7 +11,7 @@ Submodules are imported on demand, so that importing canobspy never requires Met
 """
 import importlib
 
-__version__ = "0.9.0.9000"  # same version as the R package canObsR
+__version__ = "0.9.0.9000"  # same version as the R package canobsR
 
 _SUBMODULES = ("timesift_odm", "timesift_metashape", "compare", "selftest")
 

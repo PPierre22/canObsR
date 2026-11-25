@@ -21,8 +21,8 @@
 #   - after each epoch, the project is checked: no image of another epoch may be found in it;
 #   - optional colour calibration of the images on the tie points of the whole multi-temporal block or of each
 #     date (gains per image and channel, vignetting per camera and channel: equivalent of Metashape
-#     calibrateColors(white_balance=True), used by the Metashape pipeline of canObsR);
-#   - ODM options set to reproduce the Metashape pipeline of canObsR (keypoints, GPS accuracy, resolution, no crop);
+#     calibrateColors(white_balance=True), used by the Metashape pipeline of canobsR);
+#   - ODM options set to reproduce the Metashape pipeline of canobsR (keypoints, GPS accuracy, resolution, no crop);
 #   - a run can be resumed; time spent in each ODM stage is reported.
 #
 # The python standard library is enough, except for the colour calibration (numpy + pillow or gdal).
@@ -62,7 +62,7 @@ DENSE_OPTIONS = {'--pc-quality': (1, 'openmvs'), '--pc-skip-geometric': (0, 'ope
                  '--dem-decimation': (1, 'mvs_texturing'), '--orthophoto-compression': (1, 'mvs_texturing'),
                  '--orthophoto-cutline': (0, 'mvs_texturing'), '--skip-report': (0, 'mvs_texturing'),
                  '--build-overviews': (0, 'mvs_texturing'), '--cog': (0, 'mvs_texturing')}
-# Settings of the Metashape pipeline of canObsR, reproduced with ODM (see the documentation of the engines):
+# Settings of the Metashape pipeline of canobsR, reproduced with ODM (see the documentation of the engines):
 GPS_ACCURACY = 10               # m, Metashape default accuracy of the camera positions (Reference settings)
 KEYPOINT_LIMIT = 10000          # keypoints per image (Metashape pipeline: 100000; see ENGINES.md, tests of 24/11/2026)
 TIMINGS_FILE = 'timings.csv'
@@ -232,6 +232,68 @@ def exif_info(path, nbytes=131072):
         return None, None
     m = re.search(rb'(?:19|20)\d{2}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}', head)
     return (m.group().decode(), None) if m else (None, None)
+
+
+def exif_latlon(path):
+    """(latitude, longitude) in decimal degrees from the EXIF GPS tags, None if absent."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            g = im.getexif().get_ifd(0x8825)
+    except Exception:
+        return None
+    if not g or 2 not in g or 4 not in g:
+        return None
+
+    def deg(v, ref):
+        d = float(v[0]) + float(v[1]) / 60 + float(v[2]) / 3600
+        return -d if str(ref).strip('\x00 ').upper() in ('S', 'W') else d
+    try:
+        return deg(g[2], g.get(1, 'N')), deg(g[4], g.get(3, 'E'))
+    except Exception:
+        return None
+
+
+def utm_epsg(lat, lon):
+    """EPSG code of the WGS 84 / UTM zone of a point (with the exceptions of Norway and Svalbard)."""
+    zone = int((lon + 180) // 6) % 60 + 1
+    if 56 <= lat < 64 and 3 <= lon < 12:
+        zone = 32
+    if 72 <= lat < 84 and 0 <= lon < 42:
+        zone = 31 if lon < 9 else 33 if lon < 21 else 35 if lon < 33 else 37
+    return (32600 if lat >= 0 else 32700) + zone, zone
+
+
+def utm_from_images(path_in, folder_names=None, per_folder=3):
+    """
+    UTM zone (WGS 84) of a site, from the GPS positions of a few images of each flight folder (the first ones
+    with GPS tags): median latitude and longitude. Returns a dict: epsg, zone, hemisphere, lat, lon, n_images,
+    zones (all the zones met: more than one if the site is on a zone boundary).
+    """
+    folders = folder_names or sorted(d for d in os.listdir(path_in) if os.path.isdir(os.path.join(path_in, d)))
+    pts = []
+    for d in folders:
+        k = 0
+        for root, _, files in os.walk(os.path.join(path_in, d)):
+            for n in sorted(files):
+                if os.path.splitext(n)[1].lower() not in ('.jpg', '.jpeg', '.tif', '.tiff', '.dng'):
+                    continue
+                ll = exif_latlon(os.path.join(root, n))
+                if ll:
+                    pts.append(ll)
+                    k += 1
+                if k >= per_folder:
+                    break
+            if k >= per_folder:
+                break
+    if not pts:
+        raise ValueError(f'No image with GPS tags in {path_in}: give the crs (e.g. "EPSG:32633").')
+    lats = sorted(p[0] for p in pts)
+    lons = sorted(p[1] for p in pts)
+    lat, lon = lats[len(lats) // 2], lons[len(lons) // 2]
+    epsg, zone = utm_epsg(lat, lon)
+    return {'epsg': epsg, 'zone': zone, 'hemisphere': 'N' if lat >= 0 else 'S', 'lat': round(lat, 5),
+            'lon': round(lon, 5), 'n_images': len(pts), 'zones': sorted({utm_epsg(a, b)[0] for a, b in pts})}
 
 
 def exif_date(path):
@@ -894,7 +956,7 @@ def _track_sampling(path, max_obs, n_probe=5000):
 def compute_color_gains(block_dir, by='chunk', vignetting=True, max_obs=3000000):
     """
     Colour calibration of the images on the tie points of the multi-temporal block (equivalent of Metashape
-    calibrateColors(TiePointsData, white_balance=True), run by the Metashape pipeline of canObsR): one gain per image
+    calibrateColors(TiePointsData, white_balance=True), run by the Metashape pipeline of canobsR): one gain per image
     and per channel (white_balance=True: each channel corrected separately) and, with vignetting=True, one
     vignetting polynomial per camera and per channel, so that a tie point has the same colour in all the images
     where it is seen.
@@ -1323,7 +1385,7 @@ def timesift_odm_process(pathDIR,
     if int(downscale_factor_alignement) not in ALIGN_QUALITY or int(downscale_factor_depth_map) not in DEPTH_QUALITY:
         raise ValueError('downscale_factor_alignement must be in 0, 1, 2, 4, 8 and downscale_factor_depth_map in 1, 2, 4, 8, 16')
 
-    # Options chosen to reproduce the Metashape pipeline of canObsR (see the documentation of the engines):
+    # Options chosen to reproduce the Metashape pipeline of canobsR (see the documentation of the engines):
     #  --ignore-gsd: products at resol_ref even when ODM estimates a coarser GSD, undistorted images at full size
     #                (by default ODM caps the resolution at its GSD estimate - 10 %);
     #  --crop 0: no buffer removed around the products (by default ODM removes 3 m along the edges);
@@ -1374,7 +1436,7 @@ def timesift_odm_process(pathDIR,
                 old = _upgrade_params(json.load(f), workdir)
         if old is None or old['images'] != params['images'] or old['sfm_options'] != params['sfm_options']:
             raise TimeSiftError(f'{workdir} contains a previous run made with other images or SfM parameters '
-                                f'(canObsR 0.0.0.9012 changed the SfM parameters to reproduce Metashape). '
+                                f'(canobsR 0.0.0.9012 changed the SfM parameters to reproduce Metashape). '
                                 f'Use overwrite = TRUE to delete it, or give another out_dir_project.')
     with open(params_path, 'w', encoding='utf-8') as f:
         json.dump(params, f, indent=1)

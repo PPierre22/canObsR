@@ -1,6 +1,6 @@
 # `generate_Mosa()` : chaînes Metashape et OpenDroneMap — convergences et différences
 
-canObsR 0.0.0.9012 — ODM 3.6.2 (OpenSfM, OpenMVS, mvs-texturing), API Python de Metashape 2.x.
+canobsR 0.0.0.9012 — ODM 3.6.2 (OpenSfM, OpenMVS, mvs-texturing), API Python de Metashape 2.x.
 
 Ce document décrit, étape par étape, ce que fait chacune des deux chaînes de `generate_Mosa()`
 (`engine = "metashape"` et `engine = "odm"`), ce qui est identique, ce qui a été aligné, et ce qui reste
@@ -77,7 +77,7 @@ un autre jour (EXIF) ; `check_flights()` signale ces cas sans bloquer.
   4480 px au plus pour cette étape (`opendm/osfm.py`, limite fixe) : les images de 5472 px sont réduites d'environ
   18 %. Le nombre de points extraits est exactement `--min-num-features` (OpenSfM le passe comme nombre cible au
   détecteur ; les journaux montrent exactement 10 000 points par image avec la valeur par défaut).
-  canObsR passe `keypoint_limit` à `--min-num-features` : 10 000 par défaut pour ODM (100 000 pour Metashape).
+  canobsR passe `keypoint_limit` à `--min-num-features` : 10 000 par défaut pour ODM (100 000 pour Metashape).
 
 **Appariement.**
 - Metashape : présélection générique (images réduites) et par les positions GPS (`reference_preselection`), puis
@@ -114,7 +114,7 @@ deux images d'une même date.
 - **ODM** : le projet aligné est copié une fois par date (copie légère, images liées) et tous les fichiers qui
   listent des images sont filtrés : reconstructions OpenSfM (avec et sans distorsion), `tracks.csv`, liste des
   caméras utilisée pour la texture (`reconstruction.nvm`), `images.json`. Ne restent que les points vus dans au
-  moins 2 images de la date. ODM est relancé à partir de l'étape `openmvs`. Après chaque date, canObsR vérifie
+  moins 2 images de la date. ODM est relancé à partir de l'étape `openmvs`. Après chaque date, canobsR vérifie
   qu'aucune image d'une autre date ne figure dans les fichiers qui servent au nuage dense, à la texture et à
   l'orthomosaïque (erreur sinon ; voir aussi `check_odm_epochs()`).
 
@@ -129,12 +129,12 @@ l'alignement commun.
 - La correction est relative entre images : elle rend cohérentes les couleurs des mêmes points vus dans
   plusieurs images, sans référence absolue de gris neutre.
 - D'après la documentation communautaire de Metashape, `calibrateColors()` estime aussi le vignettage de la
-  caméra (polynôme de degré 3 en x, y). La sortie console de canObsR 0.0.0.9012 affiche ce que Metashape a
+  caméra (polynôme de degré 3 en x, y). La sortie console de canobsR 0.0.0.9012 affiche ce que Metashape a
   estimé pour le capteur (« Colour calibration … vignetting = … ») : **à vérifier** sur le prochain calcul.
 - « chunk » : calibration sur le chunk TimeSIFT avant la séparation (toutes les dates ensemble) ;
   « date » : calibration de chaque chunk-date après la séparation.
 
-**ODM** : il n'y a pas d'équivalent dans ODM. canObsR l'implémente dans `timesift_odm.py`, sur les mêmes
+**ODM** : il n'y a pas d'équivalent dans ODM. canobsR l'implémente dans `timesift_odm.py`, sur les mêmes
 données que Metashape, c'est-à-dire les points de liaison du bloc multi-dates :
 - Pour chaque observation d'un point de liaison, OpenSfM enregistre la couleur de l'image à l'endroit du point et
   sa position dans l'image (`tracks.csv`).
@@ -172,7 +172,7 @@ sans être identiques au pixel près.
   faux `nvcuda.dll` (20 Ko) à côté d'OpenMVS (`C:/ODM/SuperBuild/install/bin`) ; Windows le charge à la place du
   pilote NVIDIA, OpenMVS échoue en GPU et ODM le relance sur le processeur sans le signaler. Une fois ce fichier
   renommé (`nvcuda.dll.odm_dummy`), OpenMVS utilise le GPU : 1,3 min contre 4,8 min sur processeur pour une date du
-  jeu test (Quadro RTX 6000, pilote 537.42, `inst/validation/odm_gpu_test.R`). canObsR affiche un avertissement
+  jeu test (Quadro RTX 6000, pilote 537.42, `inst/validation/odm_gpu_test.R`). canobsR affiche un avertissement
   quand le faux fichier est présent. Puis filtrage d'OpenMVS
   (`--filter-point-cloud -20`) et filtre statistique d'ODM (16 voisins, 5 écarts-types, `--pc-filter 5`).
 - `downscale_factor_depth_map` est converti pour donner la même résolution d'image : 1 et 2 → `ultra`, 4 → `high`,
@@ -221,7 +221,7 @@ indépendante de `calibrate_col`.
 ### 3.8 Orthomosaïque finale
 
 - **Résolution** : `resol_ref` pour les deux. ODM plafonnait la résolution à son estimation du GSD moins 10 %
-  (5,48 cm au lieu des 5 cm demandés sur les données de test), puis canObsR rééchantillonnait à 5 cm. ODM est
+  (5,48 cm au lieu des 5 cm demandés sur les données de test), puis canobsR rééchantillonnait à 5 cm. ODM est
   désormais lancé avec `--ignore-gsd` et rend directement l'orthomosaïque à 5 cm. Cette option garde aussi les
   images non distordues à leur taille d'origine pour la texture, comme Metashape qui part des images d'origine.
 - **Emprise** : ODM retirait par défaut 3 m sur le pourtour (`--crop 3`). Ce n'est plus le cas (`--crop 0`) : comme
@@ -233,7 +233,7 @@ indépendante de `calibrate_col`.
     `buildOrthomosaic()`) : l'export ne rééchantillonne plus (**à vérifier** au premier calcul, ce réglage n'a pas
     pu être testé sans licence).
   - ODM rend ses produits dans la zone UTM (WGS84) du site. Quand c'est le `crs` demandé (cas des sites canobs :
-    EPSG:32622, EPSG:32633…), canObsR garde les pixels tels que rendus par ODM, sans rééchantillonnage (leur
+    EPSG:32622, EPSG:32633…), canobsR garde les pixels tels que rendus par ODM, sans rééchantillonnage (leur
     taille, calculée par ODM, s'écarte de `resol_ref` de quelques 1e-5 : 0,049998 × 0,049999 m pour 0,05 ; de même,
     Metashape a écrit 0,05001625 m) ;
     sinon, il reprojette (bilinéaire) sur une grille calée sur les multiples de `resol_ref`.
@@ -251,7 +251,7 @@ indépendante de `calibrate_col`.
   les trous), puis mis au même format (1 bande, flottant, NA hors zone).
 
 Dans les deux cas, les altitudes sont celles des positions GPS des images, sans changement de référence
-verticale par canObsR.
+verticale par canobsR.
 
 ### 3.10 Options propres à une seule chaîne
 
@@ -342,12 +342,12 @@ Elles tiennent aux algorithmes des deux logiciels et ne peuvent pas être régl�
 | `downscale_factor_depth_map` = 2 | `buildDepthMaps(downscale = 2, filter_mode = Aggressive)` | `--pc-quality ultra` |
 | `resol_ref` | `buildDem/buildOrthomosaic/exportRaster(resolution)` | `--orthophoto-resolution`, `--dem-resolution` (cm), `--ignore-gsd` |
 | `crs` | `projection` de `buildDem`, `buildOrthomosaic`, `exportRaster` | zone UTM d'ODM, reprojection R si différent |
-| `calibrate_col`, `calibrate_col_by` | `calibrateColors(TiePointsData, white_balance = TRUE)` sur le bloc ou par date | `compute_color_gains()` de canObsR |
+| `calibrate_col`, `calibrate_col_by` | `calibrateColors(TiePointsData, white_balance = TRUE)` sur le bloc ou par date | `compute_color_gains()` de canobsR |
 | `calibrate_vignetting` | (compris dans `calibrateColors`, à vérifier) | vignettage de `compute_color_gains()` |
 | `from_mesh` | `buildModel` + `buildOrthomosaic(ModelData)` | `--use-3dmesh` |
 | `out_dir_DEM` | `buildDem` + `exportRaster(ElevationData)` | `--dsm` |
 | `group_by_flight` | un chunk par vol | une date par vol |
-| (fixe) | `clip_to_boundary = TRUE`, fond blanc | `--crop 0`, fond blanc ajouté par canObsR |
+| (fixe) | `clip_to_boundary = TRUE`, fond blanc | `--crop 0`, fond blanc ajouté par canobsR |
 | `odm_args` | — | options ODM supplémentaires (prioritaires) |
 
 ## Sources

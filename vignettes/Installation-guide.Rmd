@@ -11,21 +11,21 @@ vignette: >
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
 ```
 
-canObsR is installed in two commands: one installs the R package, the other (`canobs_setup()`) installs
-everything canObsR needs outside R. This page explains both, what they print, and what to do if something goes
+canobsR is installed in two commands: one installs the R package, the other (`canobs_setup()`) installs
+everything canobsR needs outside R. This page explains both, what they print, and what to do if something goes
 wrong. It is the same on Windows, macOS and Linux, and **no administrator rights are needed**.
 
 ## What is installed, and why
 
-canObsR is a thin R package. The processing itself (Time-SIFT, colour calibration, co-registration) is done by
-**canobspy**, a Python package shipped inside canObsR, with two Python libraries that have no R equivalent:
+canobsR is a thin R package. The processing itself (Time-SIFT, colour calibration, co-registration) is done by
+**canobspy**, a Python package shipped inside canobsR, with two Python libraries that have no R equivalent:
 **GDAL** (Python bindings) and **AROSICS** (co-registration of images). Python runs in a dedicated **conda
 environment**, called `canobs`, and always in a separate process: it never interferes with the GDAL of the R
 packages `terra` and `sf`, nor with other Python installations of your computer.
 
 | Component | Needed for | Installed by |
 |---|---|---|
-| R package canObsR | everything | `remotes::install_github()` |
+| R package canobsR | everything | `remotes::install_github()` |
 | conda (Miniforge if you have none) | the Python environment | `canobs_setup()` |
 | environment `canobs`: Python 3.12, GDAL, AROSICS, canobspy | everything | `canobs_setup()` |
 | [OpenDroneMap](https://opendronemap.org) (ODM) | `generate_Mosa(engine = "odm")`, the default | you (installer), detected by `canobs_setup()` |
@@ -37,24 +37,24 @@ Disk space: about 3 GB for the conda environment (plus ~0.5 GB for Miniforge if 
 ## 1. Install R (and RStudio)
 
 R 4.0 or later ([CRAN](https://cran.r-project.org/)); RStudio is recommended but not required.
-Rtools is **not** needed: canObsR contains no code to compile.
+Rtools is **not** needed: canobsR contains no code to compile.
 
 ## 2. Install the R package
 
 ```{r}
 install.packages("remotes")
-remotes::install_github("umr-amap/canObsR")
+remotes::install_github("umr-amap/canobsR")
 ```
 
 > During the development of version 1.0, use the development branch instead:
-> `remotes::install_github("PPierre22/canObsR@v1-restructure")`
+> `remotes::install_github("PPierre22/canobsR@v1-restructure")`
 
 ## 3. Install the Python environment: `canobs_setup()`
 
 In a **new R session** (RStudio: *Session > Restart R*):
 
 ```{r}
-canObsR::canobs_setup()
+canobsR::canobs_setup()
 ```
 
 The first run takes **5 to 15 minutes**, mostly to download the Python packages (~0.5 GB, once). They are
@@ -64,8 +64,8 @@ through six steps, and reports each check as `[OK]`, `[--]` (optional component 
 followed by what to do), and ends with a summary of what is still to do:
 
 ```
-    canObsR 0.9.0.9000 - installation of the Python environment
-    log: C:/Users/me/AppData/Roaming/R/config/R/canObsR/setup_20261125_101500.log
+    canobsR 0.9.0.9000 - installation of the Python environment
+    log: C:/Users/me/AppData/Roaming/R/config/R/canobsR/setup_20261125_101500.log
 
 ==> 1/6 conda
 [--] no conda found on this computer
@@ -81,8 +81,8 @@ Install Miniforge (conda of conda-forge, ~400 MB on disk) in C:/Users/me/AppData
       Executing transaction: ...working... done
 [OK] environment created
 
-==> 3/6 canobspy (Python part of canObsR)
-[OK] used directly from the R package (always the same version as canObsR): C:/Users/me/AppData/Local/R/win-library/4.5/canObsR/python
+==> 3/6 canobspy (Python part of canobsR)
+[OK] used directly from the R package (always the same version as canobsR): C:/Users/me/AppData/Local/R/win-library/4.5/canobsR/python
 
 ==> 4/6 checks
 [OK] python 3.12.16
@@ -94,22 +94,22 @@ Install Miniforge (conda of conda-forge, ~400 MB on disk) in C:/Users/me/AppData
 [OK] AROSICS: image shifted by (3, -2) px, correction found (-3, 2) px, 16 local tie points, 0.9 s
 
 ==> 5/6 photogrammetry engines (optional)
-ODM (default photogrammetry engine of canObsR) is not installed. Install ODM 3.6.2 in C:/ODM now (download of 245 MB, 5-10 min)? (Yes/no/cancel) yes
+ODM (default photogrammetry engine of canobsR) is not installed. Install ODM 3.6.2 in C:/ODM now (download of 245 MB, 5-10 min)? (Yes/no/cancel) yes
      download of https://github.com/OpenDroneMap/ODM/releases/download/v3.6.2/ODM_Setup_3.6.2.exe (245 MB)...
      installation of ODM 3.6.2 in C:/ODM (5-10 min). ...
 [OK] ODM installed in C:/ODM
 [OK] ODM 3.6.2: C:/ODM/run.bat
 [OK] NVIDIA GPU: ODM's dummy nvcuda.dll renamed, dense matching will use the GPU
-[--] Metashape module not installed: only needed by generate_Mosa(engine = "metashape") (canObsR::canobs_install_metashape())
+[--] Metashape module not installed: only needed by generate_Mosa(engine = "metashape") (canobsR::canobs_install_metashape())
 
 ==> 6/6 configuration
-[OK] saved in C:/Users/me/AppData/Roaming/R/config/R/canObsR/config.rds
+[OK] saved in C:/Users/me/AppData/Roaming/R/config/R/canobsR/config.rds
 
 ----------------------------------------------------------------------------------------------------
- canObsR: Python environment ready in 16.2 min.
+ canobsR: Python environment ready in 16.2 min.
  Still to do:
-   1. optional, only for engine = "metashape":   canObsR::canobs_install_metashape()
- Diagnosis at any time: canObsR::canobs_sitrep()     Log: C:/Users/me/AppData/Roaming/R/config/R/canObsR/setup_...log
+   1. optional, only for engine = "metashape":   canobsR::canobs_install_metashape()
+ Diagnosis at any time: canobsR::canobs_sitrep()     Log: C:/Users/me/AppData/Roaming/R/config/R/canobsR/setup_...log
 ----------------------------------------------------------------------------------------------------
 ```
 
@@ -125,17 +125,17 @@ What `canobs_setup()` does, and does not do:
   automatically. Nothing is added to your `PATH`, nothing is written in `.Rprofile`.
 * It can be run again at any time: what is installed is only checked. Run it again after installing
   or updating ODM by hand (it detects it and checks its GPU); canobspy needs nothing: it is always the copy of
-  the installed canObsR.
+  the installed canobsR.
 
 ## 4. Install OpenDroneMap (default photogrammetry engine)
 
 * **Windows**: `canobs_setup()` offers to install it; otherwise, at any time:
 
   ```{r}
-  canObsR::canobs_install_odm()
+  canobsR::canobs_install_odm()
   ```
 
-  It downloads the installer of the version of ODM used to test canObsR (3.6.2, 245 MB), installs it in `C:/ODM`
+  It downloads the installer of the version of ODM used to test canobsR (3.6.2, 245 MB), installs it in `C:/ODM`
   without administrator rights (Windows may ask permission to install the Microsoft Visual C++ libraries: accept),
   records it in the configuration and checks the GPU. To install it by hand: `ODM_Setup_x.y.z.exe` from
   <https://github.com/OpenDroneMap/ODM/releases>, then `canobs_setup()` again (or
@@ -152,40 +152,40 @@ that cannot be missed: rename it yourself, once, as administrator. Without an NV
 
 To use `generate_Mosa(engine = "metashape")`, you need Metashape Professional with a **2.x licence activated on
 the computer** (in the application: *Help > Activate product*), and its Python module in the environment of
-canObsR:
+canobsR:
 
 ```{r}
-canObsR::canobs_install_metashape()
+canobsR::canobs_install_metashape()
 ```
 
 It downloads the Python module of Metashape (2.3.2 by default, ~150 MB), installs it and checks that the licence
 is activated. A 2.x licence works with every 2.x version: the module can be more recent than the application.
-If no licence is activated, it says so in a frame that cannot be missed, `library(canObsR)` reminds it, and
+If no licence is activated, it says so in a frame that cannot be missed, `library(canobsR)` reminds it, and
 `generate_Mosa(engine = "metashape")` stops before starting. To activate it:
 
 ```{r}
-canObsR::canobs_activate_metashape("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX")     # licence key (node-locked)
-canObsR::canobs_activate_metashape(server = "27000@licences.my-lab.fr")  # or licence server (floating)
+canobsR::canobs_activate_metashape("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX")     # licence key (node-locked)
+canobsR::canobs_activate_metashape(server = "27000@licences.my-lab.fr")  # or licence server (floating)
 ```
 
-The key is sent to Agisoft (internet access to agisoft.com needed) and not stored by canObsR; the activation is the
-same as in the application (*Help > Activate product*). Modules before 2.3 cannot be used on Windows (they do not support the Python 3.12 of canObsR). Without internet
+The key is sent to Agisoft (internet access to agisoft.com needed) and not stored by canobsR; the activation is the
+same as in the application (*Help > Activate product*). Modules before 2.3 cannot be used on Windows (they do not support the Python 3.12 of canobsR). Without internet
 access to agisoft.com: download the *Python 3 Module* from <https://www.agisoft.com/downloads/installer/>, then
 `canobs_install_metashape(wheel = "<path of the .whl file>")`.
 
 ## 6. Check the installation
 
 ```{r}
-canObsR::canobs_sitrep()
+canobsR::canobs_sitrep()
 ```
 
 prints what is installed and checks that it still works (it installs nothing). **Copy its output, and the log
-file it names, in any bug report** (<https://github.com/umr-amap/canObsR/issues>).
+file it names, in any bug report** (<https://github.com/umr-amap/canobsR/issues>).
 
 A first real test, on a folder of drone images (one subfolder per date, e.g. `RGB_20250101`):
 
 ```{r}
-chk <- canObsR::check_flights("D:/my_data/rawData")   # reads the EXIF of the images, changes nothing
+chk <- canobsR::check_flights("D:/my_data/rawData")   # reads the EXIF of the images, changes nothing
 chk$folders
 ```
 
@@ -196,17 +196,17 @@ chk$folders
 | `download of Miniforge failed` | No internet access, proxy or firewall. Behind a proxy, set it before: `Sys.setenv(https_proxy = "http://proxy:port", http_proxy = "http://proxy:port")`. Or install Miniforge by hand (<https://conda-forge.org/download/>, "Just Me") and run `canobs_setup(conda = "<folder>/Scripts/conda.exe")`. |
 | `conda could not create the environment` | Look at the last lines printed, the full output is in the log. Frequent causes: proxy (conda needs `https://conda.anaconda.org`), antivirus blocking files, disk full, old conda. Try `canobs_setup(conda = "miniforge")`. |
 | `the path of conda contains spaces or accents` | Some packages fail to install there (frequent with Windows user names). `canobs_setup(conda = "miniforge")` installs Miniforge in `C:/canobs-miniforge3` in that case. |
-| `The Python environment of canObsR is not installed` | `canobs_setup()` has not been run on this computer, or the environment was deleted: run it. |
+| `The Python environment of canobsR is not installed` | `canobs_setup()` has not been run on this computer, or the environment was deleted: run it. |
 | `ODM WILL NOT USE THE GPU` | See *NVIDIA GPU* above. |
 | Anything else | `canobs_setup(reinstall = TRUE)` recreates the environment from scratch. Otherwise, open an issue with the output of `canobs_sitrep()` and the log. |
 
 ## Uninstall
 
 ```{r}
-cfg <- canObsR::canobs_config()
+cfg <- canobsR::canobs_config()
 cfg$envdir                                   # the conda environment: delete this folder
-tools::R_user_dir("canObsR", "config")       # configuration and logs: delete this folder
-remove.packages("canObsR")
+tools::R_user_dir("canobsR", "config")       # configuration and logs: delete this folder
+remove.packages("canobsR")
 ```
 
 Miniforge, if `canobs_setup()` installed it, is in `%LOCALAPPDATA%/canobs/miniforge3` (Windows) or

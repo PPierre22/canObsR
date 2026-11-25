@@ -1,7 +1,7 @@
 # =====================================================================================================
 # Comparison of two series of orthomosaics produced on the same data: Metashape (reference) vs ODM
 # =====================================================================================================
-# Measures (AROSICS local co-registration, same settings as canObsR align_Mosa()):
+# Measures (AROSICS local co-registration, same settings as canobsR align_Mosa()):
 #   A. co-registration BETWEEN DATES inside each engine: every date vs the first date. This is the quality
 #      of the Time-SIFT (the reason why it is used): the smaller the residual shifts, the better. Both
 #      engines are compared on this criterion.
@@ -23,13 +23,13 @@ library(reticulate)
 
 # ---- settings (a value already defined, e.g. by benchmark_engines.R, is kept) ----------------------
 default <- function(name, value) if (!exists(name, envir = globalenv())) assign(name, value, envir = globalenv())
-default("my_path",   "D:/canObsR/data/canObsR_data/canObsR_data")
+default("my_path",   "D:/canobsR/data/canobsR_data/canobsR_data")
 default("dir_ref",   file.path(my_path, "2_orthomosaics"))        # Metashape
 default("dir_odm",   file.path(my_path, "2_orthomosaics_odm2"))   # ODM
 default("dir_out",   file.path(my_path, "compare_engines"))
-default("py_file",   "D:/canObsR/compare_engines.py")             # python file delivered with this script
+default("py_file",   "D:/canobsR/compare_engines.py")             # python file delivered with this script
 default("conda_env", "C:/ProgramData/miniconda3/envs/arosics")    # environment with arosics
-default("tmp_dir",   "D:/canObsR/tmp/compare")                    # temporary files of terra (not on C:)
+default("tmp_dir",   "D:/canobsR/tmp/compare")                    # temporary files of terra (not on C:)
 default("CPUs",      NULL)                                        # NULL = 16 processes
 default("engines_A", c("Metashape", "ODM"))                       # section A: engines to compare between dates
 # --------------------------------------------------------------------------------------------------

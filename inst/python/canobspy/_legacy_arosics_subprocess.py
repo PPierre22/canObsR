@@ -31,7 +31,7 @@ def launch_arosics_in_subproc(path_in,
     
 
     logging.basicConfig(level=logging.INFO)
-    command = f"python D:/githubs/canObsR/inst/PYTHON/arosics_chain.py --path_in={path_in} --ref_filepath={ref_filepath} --out_dir_path={out_dir_path} --corr_type={corr_type} --max_shift={int(max_shift)} --max_iter={int(max_iter)} --min_reliability={int(min_reliability)} --compress_lzw={compress_lzw} --apply_matrix={apply_matrix} --save_data={save_data} --save_plot={save_vector_plot} --suffix={suffix}"
+    command = f"python D:/githubs/canobsR/inst/PYTHON/arosics_chain.py --path_in={path_in} --ref_filepath={ref_filepath} --out_dir_path={out_dir_path} --corr_type={corr_type} --max_shift={int(max_shift)} --max_iter={int(max_iter)} --min_reliability={int(min_reliability)} --compress_lzw={compress_lzw} --apply_matrix={apply_matrix} --save_data={save_data} --save_plot={save_vector_plot} --suffix={suffix}"
 
     if grid_res!=None:
         command += f"--grid_res={int(grid_res)}"

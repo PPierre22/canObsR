@@ -21,7 +21,7 @@
 # Results in <bench_dir>/gpu_test: gpu_test_summary.csv, logs of OpenMVS, GPU logs.
 # =====================================================================================================
 
-if (!exists("my_path")) my_path <- "D:/canObsR/data/canObsR_data/canObsR_data"
+if (!exists("my_path")) my_path <- "D:/canobsR/data/canobsR_data/canobsR_data"
 gpu_scene_dir <- file.path(my_path, "benchmark2", "project_odm", "20220427", "opensfm", "undistorted", "openmvs")
 gpu_out_dir   <- file.path(my_path, "benchmark2", "gpu_test")
 odm_bin       <- "C:/ODM/SuperBuild/install/bin"

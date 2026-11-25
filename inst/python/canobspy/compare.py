@@ -1,6 +1,6 @@
 # Comparison of two series of orthomosaics (e.g. Metashape vs ODM) with AROSICS local co-registration.
 #
-# Used by compare_Mosa_engines.R. AROSICS settings are the ones of canObsR align_Mosa() (local mode):
+# Used by compare_Mosa_engines.R. AROSICS settings are the ones of canobsR align_Mosa() (local mode):
 # matching window 256 px, max_shift 250 px, max_iter 5, min_reliability 60 %, grid of about 25 x 25 points.
 #
 # For a pair (reference, target), AROSICS measures on a grid of points the local shift of the target relative

@@ -1,5 +1,5 @@
-# Installation and diagnosis of what canObsR needs outside R: conda, the Python environment (canobspy, GDAL,
-# AROSICS), and the photogrammetry engines (ODM, Metashape). See vignette("installation", package = "canObsR").
+# Installation and diagnosis of what canobsR needs outside R: conda, the Python environment (canobspy, GDAL,
+# AROSICS), and the photogrammetry engines (ODM, Metashape). See vignette("installation", package = "canobsR").
 #
 # Design rules:
 #  - Windows, macOS and Linux; with or without an existing conda; without administrator rights;
@@ -20,12 +20,12 @@
 
 .lock_file <- function() {
    p <- .conda_platform()
-   f <- if (is.na(p)) "" else system.file("python", "locks", paste0("canobs-", p, ".txt"), package = "canObsR")
+   f <- if (is.na(p)) "" else system.file("python", "locks", paste0("canobs-", p, ".txt"), package = "canobsR")
    if (nzchar(f)) f else NULL
 }
 
 # ---- console + log ------------------------------------------------------------------------------------
-.say <- function(status, ..., log = getOption("canObsR.setup_log")) {
+.say <- function(status, ..., log = getOption("canobsR.setup_log")) {
    tag <- c(ok = "[OK]", no = "[--]", ko = "[!!]", info = "    ", step = "\n==>")[[status]]
    msg <- paste0(tag, " ", paste0(..., collapse = ""))
    message(msg)
@@ -34,7 +34,7 @@
 }
 
 # runs a program; its output is shown (filtered) and fully written in the log
-.run <- function(cmd, args, echo = TRUE, env = NULL, log = getOption("canObsR.setup_log")) {
+.run <- function(cmd, args, echo = TRUE, env = NULL, log = getOption("canobsR.setup_log")) {
    if (!is.null(log)) cat("\n$", cmd, paste(args, collapse = " "), "\n", file = log, append = TRUE)
    cb <- function(line, proc) {
       if (!is.null(log)) cat(line, "\n", sep = "", file = log, append = TRUE)
@@ -62,7 +62,7 @@
    for (u in urls) for (m in methods) {
       ok <- tryCatch(suppressWarnings(utils::download.file(u, dest, mode = "wb", quiet = TRUE, method = m)) == 0,
                      error = function(e) {
-                        log <- getOption("canObsR.setup_log")
+                        log <- getOption("canobsR.setup_log")
                         if (!is.null(log)) cat("download failed (", m, "): ", u, ": ", conditionMessage(e), "\n",
                                                file = log, append = TRUE, sep = "")
                         FALSE
@@ -167,7 +167,7 @@
 
 # ---- engines ----------------------------------------------------------------------------------------
 .find_odm <- function(odm_path = NULL) {
-   cand <- c(odm_path, getOption("canObsR.odm_path"), Sys.getenv("ODM_PATH"),
+   cand <- c(odm_path, getOption("canobsR.odm_path"), Sys.getenv("ODM_PATH"),
              if (.is_windows()) "C:/ODM/run.bat")
    cand <- cand[!is.null(cand) & nzchar(cand)]
    hit <- cand[file.exists(cand) & !dir.exists(cand)]
@@ -179,10 +179,10 @@
    if (file.exists(v)) trimws(readLines(v, warn = FALSE)[1]) else "version unknown"
 }
 
-#' Install, or check, everything canObsR needs outside R
+#' Install, or check, everything canobsR needs outside R
 #'
 #' @description
-#' Run it once after installing canObsR, and again after installing or updating ODM by hand. An update of canObsR
+#' Run it once after installing canobsR, and again after installing or updating ODM by hand. An update of canobsR
 #' needs nothing more: canobspy, its Python part, is run from the installed package. It can be run again at any
 #' time: what is already installed is only checked.
 #'
@@ -191,7 +191,7 @@
 #'    Miniforge is downloaded and installed in a folder of the user (no administrator rights needed);
 #' 2. **Python environment** `envname` with Python, GDAL and AROSICS from conda-forge only (5 to 20 min the first
 #'    time; an existing environment of another name is never modified);
-#' 3. **canobspy**, the Python part of canObsR, shipped with the R package (same version);
+#' 3. **canobspy**, the Python part of canobsR, shipped with the R package (same version);
 #' 4. **checks**: imports and versions, and AROSICS co-registers two synthetic images with a known shift;
 #' 5. **photogrammetry engines** (optional): ODM (and whether it can use an NVIDIA GPU), Metashape;
 #' 6. the configuration is saved: the next R sessions use it automatically.
@@ -199,16 +199,16 @@
 #' The full output, including conda's, is written to a log file (path printed at the start and in
 #' [canobs_sitrep()]): send it with any installation problem.
 #'
-#' @param envname character. Name of the conda environment of canObsR.
+#' @param envname character. Name of the conda environment of canobsR.
 #' @param conda character. `"auto"`: the conda used before, else one found on this computer, else Miniforge is
-#'   installed. `"miniforge"`: always use a Miniforge installed for canObsR (in `conda_dir`), whatever else is
+#'   installed. `"miniforge"`: always use a Miniforge installed for canobsR (in `conda_dir`), whatever else is
 #'   installed: the most predictable choice if the existing conda is old or misconfigured. Or the path of a conda
 #'   executable (`.../Scripts/conda.exe` on Windows, `.../bin/conda` elsewhere).
 #' @param conda_dir character. Where to install Miniforge. Default: in the user folder
 #'   (`%LOCALAPPDATA%/canobs/miniforge3` on Windows, `~/.local/share/canobs/miniforge3` elsewhere), or
 #'   `C:/canobs-miniforge3` if the Windows user folder contains spaces or accents.
 #' @param odm_path character. Path of ODM (`run.bat` of the Windows installer of ODM, `run.sh` of a native Linux
-#'   installation). Default: option `canObsR.odm_path`, environment variable `ODM_PATH`, `C:/ODM/run.bat`. ODM is
+#'   installation). Default: option `canobsR.odm_path`, environment variable `ODM_PATH`, `C:/ODM/run.bat`. ODM is
 #'   only needed by [generate_Mosa()] with `engine = "odm"`.
 #' @param metashape_wheel character. Path of a Metashape Python module (`.whl`) to install in the environment
 #'   (see [canobs_install_metashape()], which downloads it). Only needed by `generate_Mosa(engine = "metashape")`.
@@ -220,20 +220,20 @@
 #'
 #' @examples
 #' \dontrun{
-#' canObsR::canobs_setup()                                  # first installation, or check
-#' canObsR::canobs_setup(odm_path = "D:/ODM/run.bat")        # ODM installed elsewhere than C:/ODM
-#' canObsR::canobs_setup(conda = "miniforge")               # ignore the conda already installed
-#' canObsR::canobs_sitrep()                                 # diagnosis, to send with a bug report
+#' canobsR::canobs_setup()                                  # first installation, or check
+#' canobsR::canobs_setup(odm_path = "D:/ODM/run.bat")        # ODM installed elsewhere than C:/ODM
+#' canobsR::canobs_setup(conda = "miniforge")               # ignore the conda already installed
+#' canobsR::canobs_sitrep()                                 # diagnosis, to send with a bug report
 #' }
 canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, odm_path = NULL,
                          metashape_wheel = NULL, reinstall = FALSE, ask = interactive()) {
    dir.create(.canobs_config_dir(), recursive = TRUE, showWarnings = FALSE)
    log <- file.path(.canobs_config_dir(), paste0("setup_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
-   old <- options(canObsR.setup_log = log); on.exit(options(old), add = TRUE)
+   old <- options(canobsR.setup_log = log); on.exit(options(old), add = TRUE)
    t0 <- Sys.time()
    prev <- canobs_config()
    if (is.null(conda_dir)) conda_dir <- .default_conda_dir()
-   .say("info", "canObsR ", as.character(utils::packageVersion("canObsR")), " - installation of the Python environment")
+   .say("info", "canobsR ", as.character(utils::packageVersion("canobsR")), " - installation of the Python environment")
    .say("info", R.version.string, ", ", utils::sessionInfo()$running, ", ", Sys.info()[["machine"]])
    .say("info", "log: ", log)
 
@@ -250,7 +250,7 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
       if (is.null(cbin)) cbin <- .find_conda()
    }
    if (is.null(cbin)) {
-      .say("no", if (identical(conda, "miniforge")) "no Miniforge for canObsR yet" else "no conda found on this computer")
+      .say("no", if (identical(conda, "miniforge")) "no Miniforge for canobsR yet" else "no conda found on this computer")
       if (ask && !isTRUE(utils::askYesNo(paste0("Install Miniforge (conda of conda-forge, ~400 MB on disk) in ", conda_dir, "?"))))
          stop("Installation cancelled. canobs_setup(conda_dir = ...) installs Miniforge elsewhere; ",
               "canobs_setup(conda = ...) uses a conda of your choice.", call. = FALSE)
@@ -259,7 +259,7 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    cver <- .conda_version(cbin)
    if (is.na(cver)) {
       .say("ko", "conda does not answer: ", cbin, " (see the log)")
-      .say("info", "Try canobs_setup(conda = \"miniforge\") to install a separate Miniforge for canObsR.")
+      .say("info", "Try canobs_setup(conda = \"miniforge\") to install a separate Miniforge for canobsR.")
       stop("conda does not work.", call. = FALSE)
    }
    .say("ok", "conda ", cver, ": ", cbin)
@@ -315,9 +315,9 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    pyrun <- function(args, echo = FALSE) .run(py, args, echo = echo, env = .env_vars(envdir))
 
    # 3. canobspy ----------------------------------------------------------------------------------------
-   .say("step", "3/6 canobspy (Python part of canObsR)")
-   .say("ok", "used directly from the R package (always the same version as canObsR): ",
-        normalizePath(system.file("python", package = "canObsR"), winslash = "/"))
+   .say("step", "3/6 canobspy (Python part of canobsR)")
+   .say("ok", "used directly from the R package (always the same version as canobsR): ",
+        normalizePath(system.file("python", package = "canobsR"), winslash = "/"))
    if (!is.null(metashape_wheel)) {
       if (!file.exists(metashape_wheel)) stop("File not found: ", metashape_wheel, call. = FALSE)
       .say("info", "installation of the Metashape module: ", basename(metashape_wheel))
@@ -355,7 +355,7 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    odm <- .find_odm(if (!is.null(odm_path)) odm_path else prev$odm_path)
    if (!is.null(odm_path) && is.null(odm)) .say("ko", "ODM not found at ", odm_path)
    if (is.null(odm) && .is_windows() && ask &&
-       isTRUE(utils::askYesNo(paste0("ODM (default photogrammetry engine of canObsR) is not installed. Install ODM ",
+       isTRUE(utils::askYesNo(paste0("ODM (default photogrammetry engine of canobsR) is not installed. Install ODM ",
                                      .odm_tested, " in C:/ODM now (download of 245 MB, 5-10 min)?")))) {
       odm <- tryCatch(.install_odm("C:/ODM", .odm_tested), error = function(e) { .say("ko", conditionMessage(e)); NULL })
    }
@@ -365,7 +365,7 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    # 6. configuration ------------------------------------------------------------------------------------
    .say("step", "6/6 configuration")
    cfg <- list(conda = cbin, envname = envname, envdir = envdir, python = py, odm_path = odm, versions = v,
-               selftest = st, canObsR = as.character(utils::packageVersion("canObsR")), date = format(Sys.time()),
+               selftest = st, canobsR = as.character(utils::packageVersion("canobsR")), date = format(Sys.time()),
                log = log)
    saveRDS(cfg, .canobs_config_file())
    .say("ok", "saved in ", .canobs_config_file())
@@ -374,22 +374,22 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    todo <- character(0)
    if (!isTRUE(st$ok)) todo <- c(todo, "AROSICS test failed (step 4): send the log to the developers")
    if (is.null(odm)) {
-      todo <- c(todo, if (.is_windows()) "install ODM, needed to make mosaics:   canObsR::canobs_install_odm()"
+      todo <- c(todo, if (.is_windows()) "install ODM, needed to make mosaics:   canobsR::canobs_install_odm()"
                       else "ODM, needed to make mosaics, runs with docker: generate_Mosa(..., odm_runner = \"docker\")")
    } else if (identical(gpu$status, "dummy_present")) {
       todo <- c(todo, paste0("ODM will not use the GPU: rename ", gpu$path, " to nvcuda.dll.odm_dummy (as administrator)"))
    }
-   if (is.null(v$metashape)) todo <- c(todo, "optional, only for engine = \"metashape\":   canObsR::canobs_install_metashape()")
+   if (is.null(v$metashape)) todo <- c(todo, "optional, only for engine = \"metashape\":   canobsR::canobs_install_metashape()")
    else if (!isTRUE(v$metashape_activated)) todo <- c(todo, paste0("Metashape module installed but NO ACTIVATED LICENCE: ",
-                                                                   "canObsR::canobs_activate_metashape(\"<licence key>\")"))
+                                                                   "canobsR::canobs_activate_metashape(\"<licence key>\")"))
    bar <- strrep("-", 100)
    message("\n", bar)
-   message(" canObsR: Python environment ready in ", round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 1), " min.")
+   message(" canobsR: Python environment ready in ", round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 1), " min.")
    if (length(todo)) {
       message(" Still to do:")
       for (k in seq_along(todo)) message("   ", k, ". ", todo[k])
-   } else message(" Nothing left to do: canObsR is ready.")
-   message(" Diagnosis at any time: canObsR::canobs_sitrep()     Log: ", log)
+   } else message(" Nothing left to do: canobsR is ready.")
+   message(" Diagnosis at any time: canobsR::canobs_sitrep()     Log: ", log)
    message(bar)
    if (!is.null(log)) cat(" Still to do:", todo, sep = "\n", file = log, append = TRUE)
    invisible(cfg)
@@ -397,12 +397,12 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
 
 # ---- Metashape ----------------------------------------------------------------------------------------
 # Python module of Metashape (standalone, needs a Metashape Professional 2.x licence activated on the computer).
-# From 2.3, the wheels support Python 3.9-3.13; up to 2.2, Python <= 3.11 only on Windows (not the 3.12 of canObsR).
+# From 2.3, the wheels support Python 3.9-3.13; up to 2.2, Python <= 3.11 only on Windows (not the 3.12 of canobsR).
 .metashape_tested <- "2.3.2"
 
 .metashape_wheel_url <- function(version) {
    if (numeric_version(version) < "2.3")
-      stop("Metashape modules before 2.3 do not support Python 3.12 (environment of canObsR) on Windows: use ",
+      stop("Metashape modules before 2.3 do not support Python 3.12 (environment of canobsR) on Windows: use ",
            "version >= 2.3 (a Metashape 2.x licence works with all 2.x versions).", call. = FALSE)
    tags <- "cp39.cp310.cp311.cp312.cp313"
    plat <- switch(Sys.info()[["sysname"]],
@@ -413,13 +413,13 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
 .metashape_report <- function(v) {
    if (is.null(v$metashape)) {
       .say("no", "Metashape module not installed: only needed by generate_Mosa(engine = \"metashape\") ",
-           "(canObsR::canobs_install_metashape())")
+           "(canobsR::canobs_install_metashape())")
    } else if (isTRUE(v$metashape_activated)) {
       .say("ok", "Metashape module ", v$metashape, ", licence activated")
    } else {
       .say("ko", "Metashape module ", v$metashape, " installed, but NO ACTIVATED LICENCE: generate_Mosa(engine = ",
            "\"metashape\") will not work. With a Metashape Professional 2.x licence key: ",
-           "canObsR::canobs_activate_metashape(\"<licence key>\")")
+           "canobsR::canobs_activate_metashape(\"<licence key>\")")
    }
 }
 
@@ -427,26 +427,26 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
 #'
 #' @description
 #' Only needed by `generate_Mosa(engine = "metashape")`. Downloads the Python module of Metashape (a `.whl` file of
-#' <https://www.agisoft.com/downloads/installer/>), installs it in the Python environment of canObsR and checks
+#' <https://www.agisoft.com/downloads/installer/>), installs it in the Python environment of canobsR and checks
 #' that a licence is activated. The module needs a **Metashape Professional 2.x licence activated on the computer**
 #' (in the Metashape application: *Help > Activate product*); a 2.x licence works with every 2.x version, so the
 #' module can be more recent than the installed application.
 #'
-#' Modules before 2.3 do not support the Python 3.12 of canObsR on Windows.
+#' Modules before 2.3 do not support the Python 3.12 of canobsR on Windows.
 #'
-#' @param version character. Version of the module. Default: the version tested with canObsR.
+#' @param version character. Version of the module. Default: the version tested with canobsR.
 #' @param wheel character. Instead of `version`: path or URL of a `.whl` file already downloaded.
 #' @return Invisibly, the version of the installed module.
 #' @export
 #' @examples
 #' \dontrun{
-#' canObsR::canobs_install_metashape()
-#' canObsR::canobs_install_metashape(wheel = "D:/downloads/metashape-2.3.2-cp39.cp310.cp311.cp312.cp313-none-win_amd64.whl")
+#' canobsR::canobs_install_metashape()
+#' canobsR::canobs_install_metashape(wheel = "D:/downloads/metashape-2.3.2-cp39.cp310.cp311.cp312.cp313-none-win_amd64.whl")
 #' }
 canobs_install_metashape <- function(version = .metashape_tested, wheel = NULL) {
    cfg <- canobs_config()
-   if (is.null(cfg)) stop("Run canObsR::canobs_setup() first.", call. = FALSE)
-   old <- options(canObsR.setup_log = cfg$log); on.exit(options(old), add = TRUE)
+   if (is.null(cfg)) stop("Run canobsR::canobs_setup() first.", call. = FALSE)
+   old <- options(canobsR.setup_log = cfg$log); on.exit(options(old), add = TRUE)
    if (is.null(wheel)) wheel <- .metashape_wheel_url(version)
    if (grepl("^https?://", wheel)) {
       dest <- file.path(tempdir(), basename(wheel))
@@ -457,7 +457,7 @@ canobs_install_metashape <- function(version = .metashape_tested, wheel = NULL) 
          .say("ko", "agisoft.com cannot be reached from R on this computer (network filter, proxy?).")
          .say("info", "1. open https://www.agisoft.com/downloads/installer/ in your web browser, section of version ",
               version, ", 'Python 3 Module', your system;")
-         .say("info", "2. then: canObsR::canobs_install_metashape(wheel = \"<path of the downloaded .whl file>\")")
+         .say("info", "2. then: canobsR::canobs_install_metashape(wheel = \"<path of the downloaded .whl file>\")")
          stop("Download of the Metashape module failed.", call. = FALSE)
       }
       wheel <- dest
@@ -478,21 +478,21 @@ canobs_install_metashape <- function(version = .metashape_tested, wheel = NULL) 
    if (!isTRUE(v$metashape_activated)) .box(c(
       paste0("Metashape module ", v$metashape, " installed, but NO LICENCE IS ACTIVATED on this computer."),
       "generate_Mosa(engine = \"metashape\") will not work until then (engine = \"odm\", the default, does not need it).",
-      "With a Metashape Professional 2.x licence key:   canObsR::canobs_activate_metashape(\"XXXXX-XXXXX-XXXXX-XXXXX-XXXXX\")",
-      "With a licence server (floating licence):        canObsR::canobs_activate_metashape(server = \"27000@my-server\")"))
+      "With a Metashape Professional 2.x licence key:   canobsR::canobs_activate_metashape(\"XXXXX-XXXXX-XXXXX-XXXXX-XXXXX\")",
+      "With a licence server (floating licence):        canobsR::canobs_activate_metashape(server = \"27000@my-server\")"))
    invisible(v$metashape)
 }
 
-#' Activate the Metashape licence for canObsR
+#' Activate the Metashape licence for canobsR
 #'
 #' @description
 #' Activates Agisoft Metashape Professional on this computer, so that `generate_Mosa(engine = "metashape")` can
 #' use the Python module installed by [canobs_install_metashape()]:
 #' * with a licence key (node-locked licence): the key is sent to the activation server of Agisoft (internet access
 #'   to agisoft.com needed); the activation is the same as in the Metashape application (*Help > Activate product*)
-#'   and is shared with it. The key is not stored by canObsR;
-#' * with a licence server (floating licence): its address is recorded in the configuration of canObsR and given to
-#'   Metashape (environment variable `agisoft_LICENSE`) each time canObsR runs it.
+#'   and is shared with it. The key is not stored by canobsR;
+#' * with a licence server (floating licence): its address is recorded in the configuration of canobsR and given to
+#'   Metashape (environment variable `agisoft_LICENSE`) each time canobsR runs it.
 #'
 #' A Metashape 2.x licence works with every 2.x version. To free a node-locked licence (e.g. before moving it to
 #' another computer), deactivate it in the Metashape application.
@@ -503,15 +503,15 @@ canobs_install_metashape <- function(version = .metashape_tested, wheel = NULL) 
 #' @export
 #' @examples
 #' \dontrun{
-#' canObsR::canobs_activate_metashape("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX")
-#' canObsR::canobs_activate_metashape(server = "27000@licences.my-lab.fr")
+#' canobsR::canobs_activate_metashape("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX")
+#' canobsR::canobs_activate_metashape(server = "27000@licences.my-lab.fr")
 #' }
 canobs_activate_metashape <- function(key = NULL, server = NULL) {
    cfg <- canobs_config()
-   if (is.null(cfg)) stop("Run canObsR::canobs_setup() first.", call. = FALSE)
-   if (is.null(cfg$versions$metashape)) stop("Install the Metashape module first: canObsR::canobs_install_metashape()", call. = FALSE)
+   if (is.null(cfg)) stop("Run canobsR::canobs_setup() first.", call. = FALSE)
+   if (is.null(cfg$versions$metashape)) stop("Install the Metashape module first: canobsR::canobs_install_metashape()", call. = FALSE)
    if (is.null(key) == is.null(server)) stop("Give either key or server.", call. = FALSE)
-   old <- options(canObsR.setup_log = cfg$log); on.exit(options(old), add = TRUE)
+   old <- options(canobsR.setup_log = cfg$log); on.exit(options(old), add = TRUE)
    if (!is.null(server)) {
       cfg$metashape_server <- server
       saveRDS(cfg, .canobs_config_file())
@@ -537,23 +537,23 @@ canobs_activate_metashape <- function(key = NULL, server = NULL) {
 .box <- function(lines) {
    bar <- strrep("!", 100)
    message("\n", bar, "\n", paste0(" ", lines, collapse = "\n"), "\n", bar)
-   log <- getOption("canObsR.setup_log")
+   log <- getOption("canobsR.setup_log")
    if (!is.null(log)) cat(lines, sep = "\n", file = log, append = TRUE)
 }
 
 # ---- ODM ----------------------------------------------------------------------------------------------
-.odm_tested <- "3.6.2"      # version of ODM used for the tests and defaults of canObsR (11/2026)
+.odm_tested <- "3.6.2"      # version of ODM used for the tests and defaults of canobsR (11/2026)
 
 .odm_missing_message <- function() {
    .say("no", "ODM not found. It is the default photogrammetry engine: generate_Mosa() needs it to make mosaics.")
    if (.is_windows()) {
       .say("info", "To install it (no administrator rights needed):")
-      .say("info", "   canObsR::canobs_install_odm()            # ODM ", .odm_tested, " in C:/ODM, found automatically afterwards")
-      .say("info", "Already installed elsewhere?  canObsR::canobs_setup(odm_path = \"D:/ODM/run.bat\")")
+      .say("info", "   canobsR::canobs_install_odm()            # ODM ", .odm_tested, " in C:/ODM, found automatically afterwards")
+      .say("info", "Already installed elsewhere?  canobsR::canobs_setup(odm_path = \"D:/ODM/run.bat\")")
    } else {
       .say("info", "On Linux and macOS, ODM runs with docker: generate_Mosa(..., odm_runner = \"docker\")",
            if (nzchar(Sys.which("docker"))) " (docker is installed)" else " (install docker first: https://docs.docker.com/get-docker/)")
-      .say("info", "Native installation on Linux: canObsR::canobs_setup(odm_path = \"<ODM folder>/run.sh\")")
+      .say("info", "Native installation on Linux: canobsR::canobs_setup(odm_path = \"<ODM folder>/run.sh\")")
    }
    invisible(list(status = "no_odm"))
 }
@@ -587,7 +587,7 @@ canobs_activate_metashape <- function(key = NULL, server = NULL) {
    .say("info", "download of ", url, " (245 MB)...")
    if (!.download(url, inst, 1e8))
       stop("Download of ODM failed (internet, proxy?). Download ", url, " by hand, install it in ", dir,
-           ", then run canObsR::canobs_setup().", call. = FALSE)
+           ", then run canobsR::canobs_setup().", call. = FALSE)
    .say("info", "installation of ODM ", version, " in ", dir, " (5-10 min). If Windows asks for permission to install ",
         "Microsoft Visual C++ libraries, accept.")
    ilog <- file.path(.canobs_config_dir(), paste0("odm_install_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
@@ -596,7 +596,7 @@ canobs_activate_metashape <- function(key = NULL, server = NULL) {
    unlink(inst)
    if (!file.exists(run))
       stop("Installation of ODM failed (exit status ", r$status, "; installer log: ", ilog, "). An antivirus can block ",
-           "it: install ", url, " by hand in ", dir, ", then run canObsR::canobs_setup().", call. = FALSE)
+           "it: install ", url, " by hand in ", dir, ", then run canobsR::canobs_setup().", call. = FALSE)
    .say("ok", "ODM installed in ", dir)
    normalizePath(run, winslash = "/")
 }
@@ -605,19 +605,19 @@ canobs_activate_metashape <- function(key = NULL, server = NULL) {
 #'
 #' @description
 #' Downloads the Windows installer of [OpenDroneMap](https://opendronemap.org) (ODM), the default photogrammetry
-#' engine of canObsR, installs it without administrator rights, records it in the configuration of canObsR and
+#' engine of canobsR, installs it without administrator rights, records it in the configuration of canobsR and
 #' checks whether it can use the NVIDIA GPU (see [canobs_setup()]). On Linux and macOS, ODM runs with docker
 #' (`generate_Mosa(..., odm_runner = "docker")`): this function only says so.
 #'
 #' @param dir character. Installation folder (no spaces or accents). Default `C:/ODM`, the folder of the installer.
-#' @param version character. Version of ODM. Default: the version used to test and set the defaults of canObsR.
+#' @param version character. Version of ODM. Default: the version used to test and set the defaults of canobsR.
 #'   `"latest"` for the latest release.
 #' @param reinstall logical. Installs even if ODM is already in `dir`.
 #' @return Invisibly, the path of `run.bat`.
 #' @export
 #' @examples
 #' \dontrun{
-#' canObsR::canobs_install_odm()
+#' canobsR::canobs_install_odm()
 #' }
 canobs_install_odm <- function(dir = "C:/ODM", version = .odm_tested, reinstall = FALSE) {
    if (!.is_windows()) {
@@ -625,8 +625,8 @@ canobs_install_odm <- function(dir = "C:/ODM", version = .odm_tested, reinstall 
       return(invisible(NULL))
    }
    cfg <- canobs_config()
-   if (is.null(cfg)) stop("Run canObsR::canobs_setup() first.", call. = FALSE)
-   old <- options(canObsR.setup_log = cfg$log); on.exit(options(old), add = TRUE)
+   if (is.null(cfg)) stop("Run canobsR::canobs_setup() first.", call. = FALSE)
+   old <- options(canobsR.setup_log = cfg$log); on.exit(options(old), add = TRUE)
    if (identical(version, "latest")) {
       rel <- tryCatch(jsonlite::fromJSON("https://api.github.com/repos/OpenDroneMap/ODM/releases/latest")$tag_name,
                       error = function(e) NULL)
@@ -640,25 +640,25 @@ canobs_install_odm <- function(dir = "C:/ODM", version = .odm_tested, reinstall 
    .odm_report(run, cfg$python, cfg$envdir)
    cfg$odm_path <- run
    saveRDS(cfg, .canobs_config_file())
-   .say("ok", "ODM recorded in the configuration of canObsR: generate_Mosa() will find it.")
+   .say("ok", "ODM recorded in the configuration of canobsR: generate_Mosa() will find it.")
    invisible(run)
 }
 
-#' Diagnosis of the installation of canObsR
+#' Diagnosis of the installation of canobsR
 #'
 #' Prints what [canobs_setup()] installed and checks that it still works, without installing anything. Copy its
 #' output (and the log file it names) in any bug report.
 #' @return Invisibly, the configuration (see [canobs_config()]).
 #' @export
 canobs_sitrep <- function() {
-   message("canObsR ", as.character(utils::packageVersion("canObsR")), " | ", R.version.string, " | ",
+   message("canobsR ", as.character(utils::packageVersion("canobsR")), " | ", R.version.string, " | ",
            utils::sessionInfo()$running, " | ", Sys.info()[["machine"]])
    cfg <- canobs_config()
    if (is.null(cfg)) {
       .say("ko", "canobs_setup() has not been run on this computer (or its configuration was deleted).")
       return(invisible(NULL))
    }
-   .say("info", "installed on ", cfg$date, " with canObsR ", cfg$canObsR, "; log: ", cfg$log)
+   .say("info", "installed on ", cfg$date, " with canobsR ", cfg$canobsR, "; log: ", cfg$log)
    .say(if (file.exists(cfg$conda)) "ok" else "ko", "conda: ", cfg$conda)
    ok_py <- !is.null(cfg$python) && file.exists(cfg$python)
    .say(if (ok_py) "ok" else "ko", "Python environment '", cfg$envname, "': ", cfg$python)
@@ -673,7 +673,7 @@ canobs_sitrep <- function() {
    }
    odm <- .find_odm(cfg$odm_path)
    .say(if (is.null(odm)) "no" else "ok", "ODM: ", if (is.null(odm)) "not found" else paste(.odm_version(odm), odm))
-   if (is.null(odm)) .say("info", if (.is_windows()) "   canObsR::canobs_install_odm() installs it" else
+   if (is.null(odm)) .say("info", if (.is_windows()) "   canobsR::canobs_install_odm() installs it" else
                          "   with docker: generate_Mosa(..., odm_runner = \"docker\")")
    smi <- Sys.which("nvidia-smi")
    gpu <- if (nzchar(smi)) tryCatch(system2(smi, c("--query-gpu=name,driver_version", "--format=csv,noheader"),

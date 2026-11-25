@@ -1,5 +1,5 @@
 """
-Quick check of the Python environment of canObsR, without any data: two synthetic GeoTIFF images, the second
+Quick check of the Python environment of canobsR, without any data: two synthetic GeoTIFF images, the second
 shifted by a known amount, must be co-registered by AROSICS (global shift, then local grid). Takes a few seconds.
 """
 import os

@@ -9,7 +9,7 @@
 #' keypoints, same accuracy of the GPS positions, depth maps at the same image resolution, colour calibration on the
 #' same tie points, products rendered at `resol_ref` in `crs`); the remaining differences come from the algorithms of
 #' each software (e.g. ODM detects the keypoints on images of 4480 px at most, and projects the images on a simplified
-#' 2.5D mesh instead of a DEM). They are described in `system.file("ENGINES.md", package = "canObsR")` (in French).
+#' 2.5D mesh instead of a DEM). They are described in `system.file("ENGINES.md", package = "canobsR")` (in French).
 #'
 #' With `engine = "odm"`:
 #' * only RGB images are handled for now (`data_type` and `sun_sensor` are not used);
@@ -43,7 +43,8 @@
 #' @param out_dir_project character. Folder where the Metashape project is saved. If no path is specified, the project is not saved by default.
 #' @param data_type character. The type of the data used. Either 'RGB' (default) or 'MS' (for multispectral images).
 #' @param resol_ref numeric. The resolution (in meters) used to generate DEMs and orthomosaics. Defaults to 0.05.
-#' @param crs character. Coordinate system used for the orthomosaic, in a string format. Example: crs="EPSG::32622" (default value).
+#' @param crs character. Coordinate system of the orthomosaics, e.g. `"EPSG:32633"`. `"auto"` (default): the WGS 84 / UTM
+#'   zone of the site, found from the GPS positions of a few images of each folder.
 #' @param site_name character. Adds the data site name into the names of all created folders and files, to better separate generated data from different projects. If not specified, the names will stay generic.
 #' @param calibrate_col logical. Calibrates the colours of the images (brightness and white balance, i.e. each colour
 #'   channel separately, and vignetting) on the tie points.
@@ -70,20 +71,20 @@
 #'   date (YYYYMMDD or YYYYMM) in their name (all the subfolders with `group_by_flight = TRUE`); the others are ignored
 #'   and listed in a message. Folders whose name starts with "." or "_", and `time-sift-block`, are always ignored.
 #' @param engine character. Photogrammetry software used: "odm" (OpenDroneMap, default) or "metashape".
-#' @param odm_path character. Only for `engine = "odm"`. With `odm_runner = "native"`, path to the ODM launcher (`run.bat` on Windows, `run.sh` on Linux). By default, the option `canObsR.odm_path`, then the environment variable `ODM_PATH`, then `C:/ODM/run.bat`. With "docker", name of the image (default "opendronemap/odm"). With "apptainer", path to the image file.
+#' @param odm_path character. Only for `engine = "odm"`. With `odm_runner = "native"`, path to the ODM launcher (`run.bat` on Windows, `run.sh` on Linux). By default, the option `canobsR.odm_path`, then the environment variable `ODM_PATH`, then `C:/ODM/run.bat`. With "docker", name of the image (default "opendronemap/odm"). With "apptainer", path to the image file.
 #' @param odm_runner character. How ODM is launched: "native" (default), "docker" or "apptainer" (clusters).
 #' @param odm_args character vector. Additional options passed to ODM, e.g. `c("--matcher-neighbors", "16")`.
 #' @param overwrite logical. Only for `engine = "odm"`. Deletes the existing ODM projects before running, instead of resuming.
 #' @param check_dates logical. Only for `engine = "odm"`. Reports the folders whose images were taken on several days or
 #'   on another day than the folder date (information only, never an error).
 #' @param tempdir_custom character. Only for `engine = "odm"`. Directory for the temporary files (R terra, GDAL and ODM).
-#'   Default: the option `canObsR.tempdir` if set (`options(canObsR.tempdir = "D:/tmp")`), otherwise a `_tmp` folder in
+#'   Default: the option `canobsR.tempdir` if set (`options(canobsR.tempdir = "D:/tmp")`), otherwise a `_tmp` folder in
 #'   `out_dir_project` (or in `out_dir_ortho`). Large temporary files are written during the post-processing of the
 #'   orthomosaics: this folder should be on a disk with free space (not the system disk). A subfolder is created in it
 #'   and deleted at the end.
 #' @param keypoint_limit integer. Number of keypoints detected per image for the alignment (Metashape `keypoint_limit`;
 #'   ODM `--min-num-features`, the number of features extracted per image). `NULL` (default): 100000 for Metashape
-#'   (its pipeline) and 10000 for ODM. Tests on the canObsR data (3 dates): the co-registration between dates is the
+#'   (its pipeline) and 10000 for ODM. Tests on the canobsR data (3 dates): the co-registration between dates is the
 #'   same with 10000, 20000 or 100000 keypoints (2.2-2.3 cm), but ODM agrees locally with Metashape only with 100000
 #'   (10 cm against about 38 cm), at the cost of an alignment 23 times longer (16 h instead of 41 min).
 #'   With Metashape, the photos that are not aligned are matched again with twice this limit.
@@ -108,9 +109,7 @@
 #' generate_Mosa(path_in = "path_to_my_drone_data",
 #'                out_dir_ortho = "my_output_folder/ORTHO",
 #'                resol_ref = 0.05,
-#'                site_name = "Bouamir",
-#'                crs = "EPSG::32633",
-#'                odm_path = "C:/ODM/run.bat"
+#'                site_name = "Bouamir"
 #'                )
 #'
 #' # With Metashape
@@ -140,7 +139,7 @@
 
 
 generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_project = NULL,
-                       data_type = "RGB", resol_ref = 0.05, crs = "EPSG::32622",
+                       data_type = "RGB", resol_ref = 0.05, crs = "auto",
                        site_name = "", calibrate_col = TRUE, sun_sensor = FALSE,
                        group_by_flight = FALSE, from_mesh = FALSE,
                        downscale_factor_alignement = 1L, downscale_factor_depth_map = 2L,
@@ -149,7 +148,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                        engine = c("odm", "metashape"),
                        odm_path = NULL, odm_runner = c("native", "docker", "apptainer"),
                        odm_args = NULL, overwrite = FALSE, check_dates = TRUE,
-                       tempdir_custom = getOption("canObsR.tempdir", NULL),
+                       tempdir_custom = getOption("canobsR.tempdir", NULL),
                        keypoint_limit = NULL, tiepoint_limit = 10000L,
                        calibrate_vignetting = TRUE, odm_gpu_fix = TRUE) {
 
@@ -159,6 +158,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    # same subfolders for both engines: by default the ones with a date (YYYYMMDD or YYYYMM) in their name
    if (is.null(folder_names)) folder_names <- .select_subfolders(path_in, group_by_flight)
    folder_names <- as.list(folder_names)     # a python list even for a single folder
+   if (identical(crs, "auto")) crs <- .auto_crs(path_in, folder_names)
+   crs <- sub("^EPSG:+", "EPSG::", crs, ignore.case = TRUE)   # form of Metashape; .crs_r() gives the one of sf/terra
 
    if (engine == "metashape") {
       .check_metashape()
@@ -263,7 +264,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
 }
 
 
-# Converts an ODM raster to the format of the Metashape outputs of canObsR
+# Converts an ODM raster to the format of the Metashape outputs of canobsR
 #  - ortho: 3 bands (alpha removed), 255 where there is no data (Metashape white background), INT1U
 #  - dem: 1 band, NA where there is no data
 #  - both: crs, resolution res.
@@ -342,9 +343,9 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    r <- .canobs_python(c("-m", "canobspy", "info"), echo = FALSE)
    v <- tryCatch(jsonlite::fromJSON(utils::tail(strsplit(r$stdout, "\n")[[1]], 1)), error = function(e) list())
    if (is.null(v$metashape))
-      stop("The Metashape Python module is not installed: canObsR::canobs_install_metashape(), or use engine = \"odm\".", call. = FALSE)
+      stop("The Metashape Python module is not installed: canobsR::canobs_install_metashape(), or use engine = \"odm\".", call. = FALSE)
    if (!isTRUE(v$metashape_activated))
-      stop("No Metashape licence is activated on this computer: canObsR::canobs_activate_metashape(\"<licence key>\"), ",
+      stop("No Metashape licence is activated on this computer: canobsR::canobs_activate_metashape(\"<licence key>\"), ",
            "or use engine = \"odm\".", call. = FALSE)
    invisible(v)
 }
@@ -364,6 +365,18 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
       warning(msg, call. = FALSE, immediate. = TRUE)
    }
    invisible(g)
+}
+
+# WGS 84 / UTM zone of the site, from the GPS tags of the images
+.auto_crs <- function(path_in, folder_names = NULL) {
+   u <- .canobs_call("timesift_odm", "utm_from_images", path_in = normalizePath(path_in, winslash = "/"),
+                     folder_names = folder_names, .echo = FALSE)
+   message("crs: EPSG:", u$epsg, " (WGS 84 / UTM zone ", u$zone, u$hemisphere, "), from the GPS positions of ",
+           u$n_images, " images (median lat ", u$lat, ", lon ", u$lon, ")")
+   if (length(u$zones) > 1)
+      warning("The images span several UTM zones (EPSG ", paste(unlist(u$zones), collapse = ", "), "): EPSG:", u$epsg,
+              " is used. Give crs to choose another one.", call. = FALSE, immediate. = TRUE)
+   paste0("EPSG::", u$epsg)
 }
 
 # crs written for Metashape ("EPSG::32633") -> form read by sf / terra ("EPSG:32633")

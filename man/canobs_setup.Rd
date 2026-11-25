@@ -2,7 +2,7 @@
 % Please edit documentation in R/setup.R
 \name{canobs_setup}
 \alias{canobs_setup}
-\title{Install, or check, everything canObsR needs outside R}
+\title{Install, or check, everything canobsR needs outside R}
 \usage{
 canobs_setup(
   envname = "canobs",
@@ -15,10 +15,10 @@ canobs_setup(
 )
 }
 \arguments{
-\item{envname}{character. Name of the conda environment of canObsR.}
+\item{envname}{character. Name of the conda environment of canobsR.}
 
 \item{conda}{character. \code{"auto"}: the conda used before, else one found on this computer, else Miniforge is
-installed. \code{"miniforge"}: always use a Miniforge installed for canObsR (in \code{conda_dir}), whatever else is
+installed. \code{"miniforge"}: always use a Miniforge installed for canobsR (in \code{conda_dir}), whatever else is
 installed: the most predictable choice if the existing conda is old or misconfigured. Or the path of a conda
 executable (\code{.../Scripts/conda.exe} on Windows, \code{.../bin/conda} elsewhere).}
 
@@ -27,7 +27,7 @@ executable (\code{.../Scripts/conda.exe} on Windows, \code{.../bin/conda} elsewh
 \verb{C:/canobs-miniforge3} if the Windows user folder contains spaces or accents.}
 
 \item{odm_path}{character. Path of ODM (\code{run.bat} of the Windows installer of ODM, \code{run.sh} of a native Linux
-installation). Default: option \code{canObsR.odm_path}, environment variable \code{ODM_PATH}, \verb{C:/ODM/run.bat}. ODM is
+installation). Default: option \code{canobsR.odm_path}, environment variable \code{ODM_PATH}, \verb{C:/ODM/run.bat}. ODM is
 only needed by \code{\link[=generate_Mosa]{generate_Mosa()}} with \code{engine = "odm"}.}
 
 \item{metashape_wheel}{character. Path of a Metashape Python module (\code{.whl}) to install in the environment
@@ -41,7 +41,7 @@ only needed by \code{\link[=generate_Mosa]{generate_Mosa()}} with \code{engine =
 Invisibly, the configuration (see \code{\link[=canobs_config]{canobs_config()}}).
 }
 \description{
-Run it once after installing canObsR, and again after installing or updating ODM by hand. An update of canObsR
+Run it once after installing canobsR, and again after installing or updating ODM by hand. An update of canobsR
 needs nothing more: canobspy, its Python part, is run from the installed package. It can be run again at any
 time: what is already installed is only checked.
 
@@ -51,7 +51,7 @@ Steps, each reported as \verb{[OK]}, \verb{[--]} (optional component absent) or 
 Miniforge is downloaded and installed in a folder of the user (no administrator rights needed);
 \item \strong{Python environment} \code{envname} with Python, GDAL and AROSICS from conda-forge only (5 to 20 min the first
 time; an existing environment of another name is never modified);
-\item \strong{canobspy}, the Python part of canObsR, shipped with the R package (same version);
+\item \strong{canobspy}, the Python part of canobsR, shipped with the R package (same version);
 \item \strong{checks}: imports and versions, and AROSICS co-registers two synthetic images with a known shift;
 \item \strong{photogrammetry engines} (optional): ODM (and whether it can use an NVIDIA GPU), Metashape;
 \item the configuration is saved: the next R sessions use it automatically.
@@ -62,9 +62,9 @@ The full output, including conda's, is written to a log file (path printed at th
 }
 \examples{
 \dontrun{
-canObsR::canobs_setup()                                  # first installation, or check
-canObsR::canobs_setup(odm_path = "D:/ODM/run.bat")        # ODM installed elsewhere than C:/ODM
-canObsR::canobs_setup(conda = "miniforge")               # ignore the conda already installed
-canObsR::canobs_sitrep()                                 # diagnosis, to send with a bug report
+canobsR::canobs_setup()                                  # first installation, or check
+canobsR::canobs_setup(odm_path = "D:/ODM/run.bat")        # ODM installed elsewhere than C:/ODM
+canobsR::canobs_setup(conda = "miniforge")               # ignore the conda already installed
+canobsR::canobs_sitrep()                                 # diagnosis, to send with a bug report
 }
 }

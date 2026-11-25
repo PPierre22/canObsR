@@ -1,4 +1,4 @@
-# How canObsR runs its Python code (canobspy).
+# How canobsR runs its Python code (canobspy).
 #
 # Python always runs in a separate process (python -m canobspy ...), with the conda environment created by
 # canobs_setup(), never inside the R session (no reticulate):
@@ -8,7 +8,7 @@
 #  - a failure of Python leaves R alive, and Esc / Ctrl+C in R stops the Python process;
 #  - the R session is never bound to a Python: no "restart R" problems with other packages that use Python.
 
-.canobs_config_dir <- function() gsub("\\\\", "/", tools::R_user_dir("canObsR", which = "config"))
+.canobs_config_dir <- function() gsub("\\\\", "/", tools::R_user_dir("canobsR", which = "config"))
 .canobs_config_file <- function() file.path(.canobs_config_dir(), "config.rds")
 
 #' Configuration saved by canobs_setup()
@@ -43,8 +43,8 @@ canobs_config <- function() {
                  collapse = .Platform$path.sep)
    v <- c(PATH = path, CONDA_PREFIX = envdir, PYTHONNOUSERSITE = "1", PYTHONIOENCODING = "utf-8",
           PYTHONUNBUFFERED = "1", PYTHONHOME = "",
-          # canobspy is run from the R package itself: always the version of the installed canObsR
-          PYTHONPATH = normalizePath(system.file("python", package = "canObsR"), winslash = "/", mustWork = FALSE))
+          # canobspy is run from the R package itself: always the version of the installed canobsR
+          PYTHONPATH = normalizePath(system.file("python", package = "canobsR"), winslash = "/", mustWork = FALSE))
    for (x in list(c("GDAL_DATA", "gdal"), c("PROJ_DATA", "proj"), c("PROJ_LIB", "proj"))) {
       d <- file.path(share, x[2])
       v[x[1]] <- if (dir.exists(d)) d else ""
@@ -62,7 +62,7 @@ canobs_config <- function() {
    if (is.null(python)) {
       cfg <- canobs_config()
       if (is.null(cfg) || is.null(cfg$python) || !file.exists(cfg$python))
-         stop("The Python environment of canObsR is not installed (or has moved): run canObsR::canobs_setup() once.",
+         stop("The Python environment of canobsR is not installed (or has moved): run canobsR::canobs_setup() once.",
               call. = FALSE)
       python <- cfg$python; envdir <- cfg$envdir
    }
@@ -76,7 +76,7 @@ canobs_config <- function() {
                  windows_hide_window = TRUE, cleanup_tree = TRUE)
 }
 
-# Calls canobspy.<module>.<fun>(...) in the Python environment of canObsR and returns its result (from JSON).
+# Calls canobspy.<module>.<fun>(...) in the Python environment of canobsR and returns its result (from JSON).
 # Arguments are sent as JSON: NULL -> None, length-1 vectors -> scalars, use I() or as.list() for lists.
 .canobs_call <- function(module, fun, ..., .echo = TRUE) {
    args <- list(...)

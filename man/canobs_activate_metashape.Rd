@@ -2,7 +2,7 @@
 % Please edit documentation in R/setup.R
 \name{canobs_activate_metashape}
 \alias{canobs_activate_metashape}
-\title{Activate the Metashape licence for canObsR}
+\title{Activate the Metashape licence for canobsR}
 \usage{
 canobs_activate_metashape(key = NULL, server = NULL)
 }
@@ -20,9 +20,9 @@ use the Python module installed by \code{\link[=canobs_install_metashape]{canobs
 \itemize{
 \item with a licence key (node-locked licence): the key is sent to the activation server of Agisoft (internet access
 to agisoft.com needed); the activation is the same as in the Metashape application (\emph{Help > Activate product})
-and is shared with it. The key is not stored by canObsR;
-\item with a licence server (floating licence): its address is recorded in the configuration of canObsR and given to
-Metashape (environment variable \code{agisoft_LICENSE}) each time canObsR runs it.
+and is shared with it. The key is not stored by canobsR;
+\item with a licence server (floating licence): its address is recorded in the configuration of canobsR and given to
+Metashape (environment variable \code{agisoft_LICENSE}) each time canobsR runs it.
 }
 
 A Metashape 2.x licence works with every 2.x version. To free a node-locked licence (e.g. before moving it to
@@ -30,7 +30,7 @@ another computer), deactivate it in the Metashape application.
 }
 \examples{
 \dontrun{
-canObsR::canobs_activate_metashape("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX")
-canObsR::canobs_activate_metashape(server = "27000@licences.my-lab.fr")
+canobsR::canobs_activate_metashape("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX")
+canobsR::canobs_activate_metashape(server = "27000@licences.my-lab.fr")
 }
 }

@@ -2,7 +2,7 @@
 % Please edit documentation in R/setup.R
 \name{canobs_sitrep}
 \alias{canobs_sitrep}
-\title{Diagnosis of the installation of canObsR}
+\title{Diagnosis of the installation of canobsR}
 \usage{
 canobs_sitrep()
 }

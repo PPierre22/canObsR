@@ -1,4 +1,4 @@
-url: https://umr-amap.github.io/canObsR/
+url: https://umr-amap.github.io/canobsR/
 
 template:
   bootstrap: 5
@@ -13,7 +13,7 @@ development:
   mode: auto
 
 navbar:
-  title: "canObsR"
+  title: "canobsR"
   structure:
     left:  [articles, reference]
     right: [search, github, lightswitch]
