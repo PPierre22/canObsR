@@ -1,0 +1,169 @@
+---
+title: "Orthomosaics of a long series of flights"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Orthomosaics of a long series of flights}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+This tutorial makes one orthomosaic per date for all the drone flights of a site, from a few dates to several
+hundreds, with `generate_mosaics()`. It assumes canobsR is installed (`vignette("Installation-guide")`).
+
+## The method in two sentences
+
+**Time-SIFT** ([Feurer & Vinatier 2018](https://doi.org/10.1016/j.isprsjprs.2018.10.016)) computes the camera
+positions of several dates **together**, in one photogrammetric block: the mosaics of these dates are then
+consistent with each other, without ground control points. A block of 100 dates would not fit in memory, so the
+dates are processed by **chunks** of about ten dates; the small shifts left between chunks are corrected afterwards
+by `align_mosaics()` (`vignette("Align-orthomosaics")`).
+
+## 1. Organise the flights
+
+One folder per site, with one subfolder per flight, named `<prefix>_<YYYYMMDD>[_<drone>]`:
+
+```
+D:/bouamir/1_flights/
+  RGB_20220427/                 flight of the main drone of the site
+  RGB_20220511/
+  RGB_20220525/
+  RGB_20220525_Matrice4E/       same day, another drone: a separate mosaic
+  ...
+```
+
+* The date in the folder name is the date of the mosaic, whatever the EXIF dates of the images (a flight
+  interrupted by rain and finished the next day stays one mosaic).
+* The optional suffix names the drone. Without suffix, the flight is from the main drone of the site. Each date and
+  drone gives one mosaic: `20220525.tif` and `20220525_Matrice4E.tif`.
+* Images can be in subfolders of the flight folder. Folders without a date (e.g. `notes`) are ignored.
+
+## 2. Check the flights
+
+```{r}
+library(canobsR)
+flights_dir <- "D:/bouamir/1_flights"
+chk <- check_flights(flights_dir)
+chk$folders[chk$folders$status != "ok", ]
+```
+
+`check_flights()` reads the EXIF of all the images and points out, per folder, images taken on another day than the
+folder date, images without GPS position, and images found twice (in two folders, for example). It changes nothing.
+
+## 3. Make the mosaics
+
+```{r}
+out_dir <- "D:/bouamir/2_mosaics"
+generate_mosaics(flights_dir, out_dir)
+```
+
+That is all. With the default settings:
+
+| Setting | Default | |
+|---|---|---|
+| `engine` | `"odm"` | OpenDroneMap; `"metashape"` with a Metashape licence |
+| `resolution` | `0.05` | pixel size, metres |
+| `crs` | `"auto"` | UTM zone of the site, from the GPS positions of the images (e.g. EPSG:32633) |
+| `keep_dem` | `FALSE` | `TRUE` also saves the elevation models in `out_dir/dem` |
+| `tmp_dir` | `out_dir/_tmp` | temporary files (tens of GB for large sites): put it on a disk with space |
+
+What it prints:
+
+```
+====================================================================================================
+generate_mosaics(): D:/bouamir/1_flights
+  -> D:/bouamir/2_mosaics
+====================================================================================================
+crs: EPSG:32633 (WGS 84 / UTM zone 33N), from the GPS positions of 312 images (median lat 3.21, lon 13.05)
+engine odm, 0.05 m, EPSG:32633
+104 dates (31950 images) in 11 chunks; plan: D:/bouamir/2_mosaics/plan.csv
+  main drone: 98 dates, 30127 images, 10 chunk(s)
+  Matrice4E: 6 dates, 1823 images, 1 chunk(s)
+  dates per chunk: 6 to 10
+0/104 mosaics already made; 11 chunk(s) to process
+====================================================================================================
+[##########--------------------] 4/11 chunks   chunk_005: 10 dates, 3104 images (main drone)   remaining time: 31.5 h
+====================================================================================================
+  ... (ODM steps)
+[OK] chunk_005: 10 mosaic(s) in 4.4 h
+```
+
+and a report at the end. The results, in `out_dir`:
+
+```
+orthomosaics/   20220427.tif, 20220511.tif, ..., 20220525_Matrice4E.tif
+dem/            (keep_dem = TRUE)
+plan.csv        chunks of dates
+journal.csv     one row per mosaic: chunk, status (done / failed), time, error message
+settings.json   settings of the series (engine, resolution, crs, ...)
+logs/           full output of each chunk
+```
+
+## 4. Interruptions, errors, new flights: run the same command again
+
+```{r}
+generate_mosaics(flights_dir, out_dir)
+```
+
+* **After an interruption** (crash, power cut, Esc, computer needed for something else): the mosaics already made
+  are skipped (`journal.csv`), and an interrupted chunk restarts from its last finished step (its project was kept).
+* **After errors**: a chunk that fails is recorded with its error, and the next chunk starts. Running the command
+  again retries the failed chunks only. `on_error = "stop"` stops at the first error instead.
+* **New flights**: add their folders and run the command again: they are planned in new chunks, and only they are
+  processed.
+
+The settings of the series (resolution, crs, ...) are saved at the first run; a later run with other settings warns
+that the mosaics already made keep the previous ones (`overwrite = TRUE` makes them again).
+
+## 5. The plan of chunks
+
+`generate_mosaics()` makes the plan itself, with `plan_mosaics()`, the first time. To look at it, or change it,
+before processing:
+
+```{r}
+plan <- plan_mosaics(flights_dir, out_dir, chunk_size = 8)
+table(plan$chunk, plan$drone)
+```
+
+* **One drone per chunk** by default: different cameras in one block degrade the colour calibration and the
+  matching. `split_drones = FALSE` allows mixed chunks (with a warning).
+* **Random order** by default (`order = "random"`, reproducible with `seed`): each chunk mixes dates of all the
+  seasons and years of the series, so all the chunks face the same variety of conditions.
+  `order = "chronological"` makes chunks of consecutive dates.
+* `plan.csv` can be edited by hand (column `chunk`), as long as no mosaic of the chunks concerned was made.
+
+## 6. Large sites on one computer
+
+* **Disk space**: the images are never copied by default. ODM needs them in its project folder: they are
+  *hard-linked* there (no disk space used) when the project folder (`out_dir/projects`, or the option
+  `project_dir`) is **on the same disk as the images**; otherwise they are copied, one chunk at a time. Each project
+  (tens of GB) is deleted once its mosaics are made (`keep_projects = TRUE` keeps them).
+* **Images on a network drive**: ODM reads each image several times; `stage_dir = "E:/stage"` copies the images of
+  each chunk to a local disk before processing it, and deletes them afterwards.
+* **Memory**: if a chunk fails for lack of memory, reduce the number of dates per chunk (`chunk_size = 6`, for a
+  new plan: `plan_mosaics(..., overwrite = TRUE)`).
+* **Time**: indicatively, 3 dates (133 images, 45 ha) take about 2.5 h with ODM on a workstation with an NVIDIA GPU
+  (Metashape: under 1 h). Without an NVIDIA GPU, ODM is 3 to 4 times slower.
+* **Some chunks only**: `chunks = c("chunk_001", "chunk_002")`, for example to share the work between computers
+  (same `out_dir` on a shared disk is not advised: give each computer its own `out_dir`).
+
+## 7. Engines and advanced options
+
+`engine = "odm"` (default) is free and runs on Windows, Linux (docker or native) and macOS (docker).
+`engine = "metashape"` needs a licence (`canobs_install_metashape()`). Both chains are set to give comparable
+results: same Time-SIFT logic, colour calibration of the images on the tie points of the block (white balance per
+image, vignetting per camera), same resolution and projection. Their differences are documented in
+`system.file("ENGINES.md", package = "canobsR")`.
+
+The other settings are advanced options of `generate_mosaics()`, documented in `?generate_mosaics`, for example:
+
+```{r}
+generate_mosaics(flights_dir, out_dir, keep_dem = TRUE, tmp_dir = "E:/tmp",
+                 chunk_size = 8, keypoint_limit = 20000, calibrate_col_by = "date")
+```
+
+A misspelt option is an error, not silently ignored. `generate_Mosa()` processes a single chunk (the folders given
+in `folder_names`) and is what `generate_mosaics()` runs for each chunk.

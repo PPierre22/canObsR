@@ -39,6 +39,11 @@ import subprocess
 import sys
 import time
 
+try:
+    from .flights import epoch_of_folder
+except ImportError:                                  # run as a script
+    from flights import epoch_of_folder
+
 IMG_EXT = ('.jpg', '.jpeg', '.png', '.tif', '.tiff')
 DATE_PATTERN = r'\d{4}(0[1-9]|1[0-2])([0-2][0-9]|3[01])?'
 BLOCK_NAME = 'timesift_block'
@@ -345,7 +350,7 @@ def list_epochs(path_in, group_by_flight=False, folder_names=None, check_dates=T
         if group_by_flight:
             epoch = _safe(flight)
         elif m:
-            epoch = m.group()
+            epoch = epoch_of_folder(flight)          # date, plus the drone if the folder names one
         else:
             ignored.append(flight)
             continue

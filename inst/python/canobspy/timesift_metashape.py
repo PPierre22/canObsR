@@ -11,6 +11,11 @@ import time
 import argparse
 import shutil
 
+try:
+    from .flights import epoch_of_folder
+except ImportError:                                  # run as a script
+    from flights import epoch_of_folder
+
 #scan.License().activate('your_license_key')
 
 def str2bool(v):
@@ -49,11 +54,17 @@ def add_all_chunks(doc, pathDIR=None, folder_names=None):
         add_TimeSIFT_chunk(doc, ep_path = ep_path, epoch_name = ep_name)
 
 
+def _cam_epoch(label):
+    """Epoch of a camera labelled '<flight folder>_EPOCH_<image>' (date, plus the drone if any)."""
+    folder = label.split("_EPOCH_")[0]
+    return epoch_of_folder(folder) or folder
+
+
 def add_TimeSIFT_chunk(doc, ep_path="", epoch_name=""):
     """
     Adds a single RGB chunk to the project
     """
-    if len([chk for chk in doc.chunks if re.search(epoch_name,chk.label) is not None])==0:
+    if len([chk for chk in doc.chunks if chk.label == epoch_name])==0:
         doc.addChunk()
         chunk=doc.chunks[len(doc.chunks)-1]
         chunk.label=epoch_name
@@ -151,17 +162,18 @@ def split_TimeSIFT_chunk(doc, group_by_flight = False):
     if group_by_flight:
         TS_chunk_names=np.unique([cam.label.split("_EPOCH_")[0] for cam in TS_chunk.cameras])
     else:
-        #searching for a date in YYYYMMDD or YYYYMM format in cameras_names to do the slpit
-        pattern = r'\d{4}(0[1-9]|1[0-2])([0-2][0-9]|3[01])?'
-        TS_chunk_names=np.unique([re.search(pattern, cam.label).group() if re.search(pattern, cam.label) else cam.label for cam in TS_chunk.cameras])              #r'\d+'
+        # epoch of each camera from the name of its flight folder: date, plus the drone if the folder names one
+        # ("RGB_20250115_Matrice4E" -> "20250115_Matrice4E"), so that two drones flown the same day give two mosaics
+        TS_chunk_names=np.unique([_cam_epoch(cam.label) for cam in TS_chunk.cameras])
     print(TS_chunk_names)
     for chk_name in TS_chunk_names:
-        if len([chk for chk in doc.chunks if re.search(chk_name,chk.label) is not None])==0:
+        if len([chk for chk in doc.chunks if chk.label == chk_name])==0:
             NewChunk = TS_chunk.copy()
             NewChunk.label=chk_name
-            #pattern = str(chk_name) + "_EPOCH_"
-            pattern = str(chk_name)
-            t = [pattern in cam.label for cam in NewChunk.cameras]
+            if group_by_flight:
+                t = [cam.label.split("_EPOCH_")[0] == chk_name for cam in NewChunk.cameras]
+            else:
+                t = [_cam_epoch(cam.label) == chk_name for cam in NewChunk.cameras]
             list_cameras = [NewChunk.cameras[i] for i, x in enumerate(t) if not x]
             NewChunk.remove(list_cameras)
     

@@ -84,7 +84,8 @@ canobs_config <- function() {
    fa <- tempfile("canobs_args_", fileext = ".json"); fr <- tempfile("canobs_res_", fileext = ".json")
    on.exit(unlink(c(fa, fr)), add = TRUE)
    jsonlite::write_json(args, fa, auto_unbox = TRUE, null = "null", na = "null", digits = NA)
-   res <- .canobs_python(c("-m", "canobspy", "call", module, fun, fa, fr), echo = .echo)
+   # output also written to the log file set by generate_mosaics() / align_mosaics() (option canobsR.call_log)
+   res <- .canobs_python(c("-m", "canobspy", "call", module, fun, fa, fr), echo = .echo, log = getOption("canobsR.call_log"))
    if (!file.exists(fr)) {
       stop("Python stopped before the end of canobspy.", module, ".", fun, "() (exit status ", res$status,
            "). See the messages above.", call. = FALSE)

@@ -1,0 +1,106 @@
+---
+title: "Co-registration of a series of orthomosaics"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Co-registration of a series of orthomosaics}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+The mosaics of one Time-SIFT chunk are consistent with each other, but two chunks, or two drones, can be shifted by
+some decimetres to metres (the GPS of the drones is not more accurate). Following a tree crown over time needs
+mosaics that overlay to a few centimetres: `align_mosaics()` co-registers all the mosaics of a series with
+[AROSICS](https://github.com/GFZ/arosics) (Scheffler et al. 2017).
+
+## How it works
+
+For each mosaic (the *target*):
+
+1. a **reference** is chosen (see the three modes below), aggregated to 0.5 m and converted to grey (mean of the RGB
+   bands; the white background is ignored). At 5 cm the result is practically the same, many times slower;
+2. AROSICS measures the shift between the target and the reference on a **grid of tie points** (one every 200
+   pixels of the target, i.e. 10 m at 5 cm), by correlation of 200 x 200 pixel windows, and removes the unreliable
+   points;
+3. the shifts, interpolated between the points, are **applied to the whole target**, at its own resolution: the
+   aligned mosaic is written in `out_dir`, with the same file name.
+
+## Mode `"previous"`: each date on the one before (default)
+
+```{r}
+library(canobsR)
+align_mosaics("D:/bouamir/2_mosaics/orthomosaics", "D:/bouamir/3_aligned")
+```
+
+The mosaics are taken in chronological order (date in the file name). The first one is the **anchor** of the series:
+it is copied as it is. Each next mosaic is aligned on the **last mosaic already aligned** that covers at least 90 %
+of the site (of the largest mosaic): a partial flight is aligned, but is not used as a reference. The whole series is
+thus brought onto the geometry of the first date, step by step, each date being compared with a recent one (similar
+vegetation, similar light).
+
+To bring the series onto an external reference (for example an orthophoto with ground control points), give it:
+the first mosaic is then aligned on it, and the others follow.
+
+```{r}
+align_mosaics("D:/bouamir/2_mosaics/orthomosaics", "D:/bouamir/3_aligned",
+              reference = "D:/bouamir/reference/ortho_gcp_2022.tif")
+```
+
+## Mode `"fixed"`: all the dates on one reference
+
+```{r}
+align_mosaics("D:/bouamir/2_mosaics/orthomosaics", "D:/bouamir/3_aligned_lidar",
+              mode = "fixed", reference = "D:/bouamir/lidar/canopy_model_2022.tif")
+```
+
+Each mosaic is aligned directly on the same reference, so errors cannot accumulate along the series. The reference
+can be an RGB mosaic or a single-band raster, such as a lidar canopy height model: AROSICS then matches the grey
+level of the mosaic with the shapes of the crowns of the model. Works best when the reference and the mosaics are
+not too different (season, resolution).
+
+## Mode `"nearest"`: a set of dated references
+
+```{r}
+align_mosaics("D:/bouamir/2_mosaics/orthomosaics", "D:/bouamir/3_aligned_refs",
+              mode = "nearest", reference = "D:/bouamir/references")
+```
+
+`reference` is a folder of rasters with a date in their file name (`ref_20220115.tif`, `ref_20230120.tif`, ...).
+Each mosaic is aligned on the closest one in time, before or after (the one before if two are as close): useful for
+long series with one reference per year or per season.
+
+## Results, interruptions, failures
+
+In `out_dir`: the aligned mosaics, `align_journal.csv`, `tie_points/` (the tie points of each mosaic: position,
+shift, reliability) and `_references/` (the grey 0.5 m references, kept to save time when running again).
+
+```{r}
+j <- read.csv("D:/bouamir/3_aligned/align_journal.csv")
+j[, c("epoch", "reference", "status", "n_points", "shift_x_m", "shift_y_m")]
+plot(as.Date(as.character(j$date), "%Y%m%d"), sqrt(j$shift_x_m^2 + j$shift_y_m^2),
+     xlab = "date", ylab = "median shift corrected (m)")
+```
+
+`status` is `anchor`, `done` or `failed` (with the error in `message`): a mosaic fails when fewer than 10 tie points
+are reliable (clouds, haze, flight over another area, very different season): it is then not used as a reference.
+Like `generate_mosaics()`, **running the same command again resumes** after an interruption and retries the failed
+mosaics only.
+
+## Options
+
+Advanced options of `align_mosaics()` (see `?align_mosaics`), with the values used on the canobs sites:
+
+| Option | Default | |
+|---|---|---|
+| `ref_resolution` | 0.5 | resolution of the grey reference (m) |
+| `min_ref_coverage` | 0.9 | `"previous"`: minimum coverage of a reference, relative to the largest mosaic |
+| `grid_res` | 200 | distance between tie points, pixels of the mosaic |
+| `window_size` | 200 | size of the matching windows, pixels |
+| `max_shift` | 60 | largest shift searched, pixels |
+| `max_iter` | 100 | iterations of the matching |
+| `n_cores` | min(processors, 16) | parallel processes (each one needs memory: reduce it if the computer runs out of memory) |
+| `min_points` | 10 | fewer reliable tie points: failure |
+| `epochs` | all | names of the mosaics to align, e.g. `c("20220427", "20220511")` |

@@ -30,8 +30,13 @@ reference:
 - title: Orthomosaics (Time-SIFT)
   contents:
   - check_flights
+  - plan_mosaics
+  - generate_mosaics
   - generate_Mosa
   - check_odm_epochs
+- title: Co-registration
+  contents:
+  - align_mosaics
 - title: Utilities
   contents:
   - create_files_architecture

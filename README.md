@@ -25,14 +25,24 @@ No administrator rights, Rtools or existing Python are needed. See the
 [installation guide](https://umr-amap.github.io/canobsR/articles/Installation-guide.html) for ODM, Metashape,
 the GPU and troubleshooting; `canobsR::canobs_sitrep()` prints a diagnosis to join to any bug report.
 
-## Main functions
+## In short
 
-| Function | |
-|---|---|
-| `canobs_setup()`, `canobs_sitrep()` | installation and diagnosis of the Python environment, ODM, Metashape |
-| `check_flights()` | checks the image folders (dates in the EXIF, GPS, duplicates) before processing |
-| `generate_Mosa()` | Time-SIFT orthomosaics (and DSMs), `engine = "odm"` (default) or `"metashape"` |
-| `check_odm_epochs()` | checks that the ODM projects of each date contain only images of this date |
+```r
+library(canobsR)
+check_flights("D:/site/1_flights")                                  # one subfolder per flight: RGB_20250101, ...
+generate_mosaics("D:/site/1_flights", "D:/site/2_mosaics")          # one orthomosaic per date (Time-SIFT, chunks)
+align_mosaics("D:/site/2_mosaics/orthomosaics", "D:/site/3_aligned") # co-registration (AROSICS)
+```
+
+Both processing functions are made for long series (hundreds of dates, hundreds of hectares at 5 cm) on one
+computer: they can be stopped and run again (they resume where they stopped), they keep a journal, report their
+progress and errors, and process new flights as they come.
+
+## Tutorials
+
+* [Installation](https://umr-amap.github.io/canobsR/articles/Installation-guide.html)
+* [Orthomosaics of a long series of flights](https://umr-amap.github.io/canobsR/articles/Generate-orthomosaics.html)
+* [Co-registration of a series of orthomosaics](https://umr-amap.github.io/canobsR/articles/Align-orthomosaics.html)
 
 ## Citation
 
