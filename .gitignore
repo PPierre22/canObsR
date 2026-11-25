@@ -21,3 +21,4 @@ installation_and_funcs.nb.html
 /doc/
 /Meta/
 __pycache__/
+!inst/ENGINES.md
