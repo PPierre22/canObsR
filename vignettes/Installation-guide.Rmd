@@ -61,7 +61,7 @@ The first run takes **5 to 15 minutes**, mostly to download the Python packages 
 installed from a list of exact versions tested for each system (Windows, macOS Intel and Apple Silicon, Linux):
 conda has nothing to resolve, and everybody gets the same environment. It goes
 through six steps, and reports each check as `[OK]`, `[--]` (optional component not found) or `[!!]` (problem,
-followed by what to do):
+followed by what to do), and ends with a summary of what is still to do:
 
 ```
     canObsR 0.9.0.9000 - installation of the Python environment
@@ -93,13 +93,23 @@ Install Miniforge (conda of conda-forge, ~400 MB on disk) in C:/Users/me/AppData
 [OK] AROSICS: image shifted by (3, -2) px, correction found (-3, 2) px, 16 local tie points, 0.9 s
 
 ==> 5/6 photogrammetry engines (optional)
+ODM (default photogrammetry engine of canObsR) is not installed. Install ODM 3.6.2 in C:/ODM now (download of 245 MB, 5-10 min)? (Yes/no/cancel) yes
+     download of https://github.com/OpenDroneMap/ODM/releases/download/v3.6.2/ODM_Setup_3.6.2.exe (245 MB)...
+     installation of ODM 3.6.2 in C:/ODM (5-10 min). ...
+[OK] ODM installed in C:/ODM
 [OK] ODM 3.6.2: C:/ODM/run.bat
-[--] no NVIDIA GPU: ODM will compute on the processor (dense matching 3-4 x slower, fine for tests)
-[--] Metashape module not installed: needed by generate_Mosa(engine = "metashape") only
+[OK] NVIDIA GPU: ODM's dummy nvcuda.dll renamed, dense matching will use the GPU
+[--] Metashape module not installed: needed by generate_Mosa(engine = "metashape") only (...)
 
 ==> 6/6 configuration
 [OK] saved in C:/Users/me/AppData/Roaming/R/config/R/canObsR/config.rds
-     finished in 9.4 min. canObsR is ready.
+
+----------------------------------------------------------------------------------------------------
+ canObsR: Python environment ready in 16.2 min.
+ Still to do:
+   1. optional, only for engine = "metashape": canObsR::canobs_setup(metashape_wheel = "<path>/Metashape-...whl")
+ Diagnosis at any time: canObsR::canobs_sitrep()     Log: C:/Users/me/AppData/Roaming/R/config/R/canObsR/setup_...log
+----------------------------------------------------------------------------------------------------
 ```
 
 What `canobs_setup()` does, and does not do:
@@ -117,10 +127,17 @@ What `canobs_setup()` does, and does not do:
 
 ## 4. Install OpenDroneMap (default photogrammetry engine)
 
-* **Windows**: download the installer of the latest release from
-  <https://github.com/OpenDroneMap/ODM/releases> (`ODM_Setup_x.y.z.exe`) and install it in `C:/ODM` (default).
-  Then run `canObsR::canobs_setup()` again: it finds `C:/ODM/run.bat`. If ODM is elsewhere:
-  `canobs_setup(odm_path = "D:/ODM/run.bat")`.
+* **Windows**: `canobs_setup()` offers to install it; otherwise, at any time:
+
+  ```{r}
+  canObsR::canobs_install_odm()
+  ```
+
+  It downloads the installer of the version of ODM used to test canObsR (3.6.2, 245 MB), installs it in `C:/ODM`
+  without administrator rights (Windows may ask permission to install the Microsoft Visual C++ libraries: accept),
+  records it in the configuration and checks the GPU. To install it by hand: `ODM_Setup_x.y.z.exe` from
+  <https://github.com/OpenDroneMap/ODM/releases>, then `canobs_setup()` again (or
+  `canobs_setup(odm_path = "D:/ODM/run.bat")` if it is not in `C:/ODM`).
 * **Linux / macOS**: ODM runs with [docker](https://docs.docker.com/get-docker/)
   (`generate_Mosa(..., odm_runner = "docker")`), or natively on Linux (`odm_path = ".../run.sh"`).
 

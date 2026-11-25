@@ -24,6 +24,7 @@ reference:
   - canobs_setup
   - canobs_sitrep
   - canobs_config
+  - canobs_install_odm
 - title: Orthomosaics (Time-SIFT)
   contents:
   - check_flights

@@ -345,29 +345,12 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    .say("step", "5/6 photogrammetry engines (optional)")
    odm <- .find_odm(if (!is.null(odm_path)) odm_path else prev$odm_path)
    if (!is.null(odm_path) && is.null(odm)) .say("ko", "ODM not found at ", odm_path)
-   if (is.null(odm)) {
-      .say("no", "ODM not found: needed by generate_Mosa(engine = \"odm\"). ",
-           if (.is_windows()) "Installer: https://github.com/OpenDroneMap/ODM/releases (folder C:/ODM by default), then canobs_setup() again."
-           else "Native installation (run.sh) or docker: see vignette(\"installation\", package = \"canObsR\").")
-      if (nzchar(Sys.which("docker"))) .say("info", "docker is available: generate_Mosa(odm_runner = \"docker\") can be used.")
-   } else {
-      .say("ok", "ODM ", .odm_version(odm), ": ", odm)
-      if (.is_windows()) {
-         g <- tryCatch(.canobs_python(c("-c", sprintf(paste0(
-                 "import json; from canobspy.timesift_odm import check_odm_gpu; ",
-                 "print(json.dumps(check_odm_gpu(r'%s', fix=True)))"), odm)), python = py, envdir = envdir, echo = FALSE),
-                 error = function(e) NULL)
-         g <- tryCatch(jsonlite::fromJSON(utils::tail(strsplit(g$stdout, "\n")[[1]], 1)), error = function(e) list(status = "error"))
-         msg <- switch(g$status,
-            renamed = c("ok", "NVIDIA GPU: ODM's dummy nvcuda.dll renamed, dense matching will use the GPU"),
-            no_dummy = c("ok", "NVIDIA GPU: usable by ODM"),
-            no_nvidia_driver = c("no", "no NVIDIA GPU: ODM will compute on the processor (dense matching 3-4 x slower, fine for tests)"),
-            dummy_present = c("ko", paste0("ODM's dummy nvcuda.dll hides the NVIDIA driver and could not be renamed: rename ",
-                                           g$path, " to nvcuda.dll.odm_dummy (administrator rights)")),
-            c("ko", "GPU check of ODM failed (see the log)"))
-         .say(msg[1], msg[2])
-      }
+   if (is.null(odm) && .is_windows() && ask &&
+       isTRUE(utils::askYesNo(paste0("ODM (default photogrammetry engine of canObsR) is not installed. Install ODM ",
+                                     .odm_tested, " in C:/ODM now (download of 245 MB, 5-10 min)?")))) {
+      odm <- tryCatch(.install_odm("C:/ODM", .odm_tested), error = function(e) { .say("ko", conditionMessage(e)); NULL })
    }
+   gpu <- if (is.null(odm)) .odm_missing_message() else .odm_report(odm, py, envdir)
    if (!is.null(v$metashape)) .say("ok", "Metashape module ", v$metashape, " (the licence is checked when it is used)")
    else .say("no", "Metashape module not installed: needed by generate_Mosa(engine = \"metashape\") only ",
              "(canobs_setup(metashape_wheel = \"<path>/Metashape-...whl\"))")
@@ -379,9 +362,134 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
                log = log)
    saveRDS(cfg, .canobs_config_file())
    .say("ok", "saved in ", .canobs_config_file())
-   .say("info", "finished in ", round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 1),
-        " min. canObsR is ready", if (is.null(odm) && is.null(v$metashape)) " (install ODM to make mosaics)", ".")
+
+   # summary: what is left to do (the messages of step 5 are easy to miss in a long output)
+   todo <- character(0)
+   if (!isTRUE(st$ok)) todo <- c(todo, "AROSICS test failed (step 4): send the log to the developers")
+   if (is.null(odm)) {
+      todo <- c(todo, if (.is_windows()) "install ODM, needed to make mosaics:   canObsR::canobs_install_odm()"
+                      else "ODM, needed to make mosaics, runs with docker: generate_Mosa(..., odm_runner = \"docker\")")
+   } else if (identical(gpu$status, "dummy_present")) {
+      todo <- c(todo, paste0("ODM will not use the GPU: rename ", gpu$path, " to nvcuda.dll.odm_dummy (as administrator)"))
+   }
+   if (is.null(v$metashape)) todo <- c(todo, paste0("optional, only for engine = \"metashape\": ",
+                                                    "canObsR::canobs_setup(metashape_wheel = \"<path>/Metashape-...whl\")"))
+   bar <- strrep("-", 100)
+   message("\n", bar)
+   message(" canObsR: Python environment ready in ", round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 1), " min.")
+   if (length(todo)) {
+      message(" Still to do:")
+      for (k in seq_along(todo)) message("   ", k, ". ", todo[k])
+   } else message(" Nothing left to do: canObsR is ready.")
+   message(" Diagnosis at any time: canObsR::canobs_sitrep()     Log: ", log)
+   message(bar)
+   if (!is.null(log)) cat(" Still to do:", todo, sep = "\n", file = log, append = TRUE)
    invisible(cfg)
+}
+
+# ---- ODM ----------------------------------------------------------------------------------------------
+.odm_tested <- "3.6.2"      # version of ODM used for the tests and defaults of canObsR (11/2026)
+
+.odm_missing_message <- function() {
+   .say("no", "ODM not found. It is the default photogrammetry engine: generate_Mosa() needs it to make mosaics.")
+   if (.is_windows()) {
+      .say("info", "To install it (no administrator rights needed):")
+      .say("info", "   canObsR::canobs_install_odm()            # ODM ", .odm_tested, " in C:/ODM, found automatically afterwards")
+      .say("info", "Already installed elsewhere?  canObsR::canobs_setup(odm_path = \"D:/ODM/run.bat\")")
+   } else {
+      .say("info", "On Linux and macOS, ODM runs with docker: generate_Mosa(..., odm_runner = \"docker\")",
+           if (nzchar(Sys.which("docker"))) " (docker is installed)" else " (install docker first: https://docs.docker.com/get-docker/)")
+      .say("info", "Native installation on Linux: canObsR::canobs_setup(odm_path = \"<ODM folder>/run.sh\")")
+   }
+   invisible(list(status = "no_odm"))
+}
+
+# version, then (Windows) whether OpenMVS can use the NVIDIA GPU; renames ODM's dummy nvcuda.dll if needed
+.odm_report <- function(odm, py, envdir) {
+   .say("ok", "ODM ", .odm_version(odm), ": ", odm)
+   if (!.is_windows()) return(invisible(NULL))
+   g <- tryCatch(.canobs_python(c("-c", sprintf(paste0(
+           "import json; from canobspy.timesift_odm import check_odm_gpu; ",
+           "print(json.dumps(check_odm_gpu(r'%s', fix=True)))"), odm)), python = py, envdir = envdir, echo = FALSE),
+           error = function(e) NULL)
+   g <- tryCatch(jsonlite::fromJSON(utils::tail(strsplit(g$stdout, "\n")[[1]], 1)), error = function(e) list(status = "error"))
+   msg <- switch(g$status,
+      renamed = c("ok", "NVIDIA GPU: ODM's dummy nvcuda.dll renamed, dense matching will use the GPU"),
+      no_dummy = c("ok", "NVIDIA GPU: usable by ODM"),
+      no_nvidia_driver = c("no", "no NVIDIA GPU: ODM will compute on the processor (dense matching 3-4 x slower, fine for tests)"),
+      dummy_present = c("ko", paste0("ODM's dummy nvcuda.dll hides the NVIDIA driver and could not be renamed: rename ",
+                                     g$path, " to nvcuda.dll.odm_dummy (administrator rights)")),
+      c("ko", "GPU check of ODM failed (see the log)"))
+   .say(msg[1], msg[2])
+   invisible(g)
+}
+
+.install_odm <- function(dir, version) {
+   dir <- gsub("\\\\", "/", dir)
+   if (!.ascii_no_space(dir)) stop("ODM does not work in a folder with spaces or accents: choose another dir.", call. = FALSE)
+   run <- file.path(dir, "run.bat")
+   url <- sprintf("https://github.com/OpenDroneMap/ODM/releases/download/v%s/ODM_Setup_%s.exe", version, version)
+   inst <- file.path(tempdir(), basename(url))
+   .say("info", "download of ", url, " (245 MB)...")
+   old <- options(timeout = max(3600, getOption("timeout"))); on.exit(options(old), add = TRUE)
+   ok <- tryCatch(utils::download.file(url, inst, mode = "wb", quiet = TRUE) == 0, error = function(e) FALSE)
+   if (!ok || !file.exists(inst) || file.size(inst) < 1e8)
+      stop("Download of ODM failed (internet, proxy?). Download ", url, " by hand, install it in ", dir,
+           ", then run canObsR::canobs_setup().", call. = FALSE)
+   .say("info", "installation of ODM ", version, " in ", dir, " (5-10 min). If Windows asks for permission to install ",
+        "Microsoft Visual C++ libraries, accept.")
+   ilog <- file.path(.canobs_config_dir(), paste0("odm_install_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
+   r <- .run(inst, c("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CURRENTUSER",
+                     paste0("/DIR=", gsub("/", "\\\\", dir)), paste0("/LOG=", gsub("/", "\\\\", ilog))), echo = FALSE)
+   unlink(inst)
+   if (!file.exists(run))
+      stop("Installation of ODM failed (exit status ", r$status, "; installer log: ", ilog, "). An antivirus can block ",
+           "it: install ", url, " by hand in ", dir, ", then run canObsR::canobs_setup().", call. = FALSE)
+   .say("ok", "ODM installed in ", dir)
+   normalizePath(run, winslash = "/")
+}
+
+#' Install OpenDroneMap (Windows)
+#'
+#' @description
+#' Downloads the Windows installer of [OpenDroneMap](https://opendronemap.org) (ODM), the default photogrammetry
+#' engine of canObsR, installs it without administrator rights, records it in the configuration of canObsR and
+#' checks whether it can use the NVIDIA GPU (see [canobs_setup()]). On Linux and macOS, ODM runs with docker
+#' (`generate_Mosa(..., odm_runner = "docker")`): this function only says so.
+#'
+#' @param dir character. Installation folder (no spaces or accents). Default `C:/ODM`, the folder of the installer.
+#' @param version character. Version of ODM. Default: the version used to test and set the defaults of canObsR.
+#'   `"latest"` for the latest release.
+#' @param reinstall logical. Installs even if ODM is already in `dir`.
+#' @return Invisibly, the path of `run.bat`.
+#' @export
+#' @examples
+#' \dontrun{
+#' canObsR::canobs_install_odm()
+#' }
+canobs_install_odm <- function(dir = "C:/ODM", version = .odm_tested, reinstall = FALSE) {
+   if (!.is_windows()) {
+      .odm_missing_message()
+      return(invisible(NULL))
+   }
+   cfg <- canobs_config()
+   if (is.null(cfg)) stop("Run canObsR::canobs_setup() first.", call. = FALSE)
+   old <- options(canObsR.setup_log = cfg$log); on.exit(options(old), add = TRUE)
+   if (identical(version, "latest")) {
+      rel <- tryCatch(jsonlite::fromJSON("https://api.github.com/repos/OpenDroneMap/ODM/releases/latest")$tag_name,
+                      error = function(e) NULL)
+      version <- if (is.null(rel)) .odm_tested else sub("^v", "", rel)
+   }
+   run <- file.path(dir, "run.bat")
+   if (file.exists(run) && !reinstall) {
+      .say("ok", "ODM ", .odm_version(run), " already installed in ", dir, " (reinstall = TRUE to install it again)")
+   } else run <- .install_odm(dir, version)
+   run <- normalizePath(run, winslash = "/")
+   .odm_report(run, cfg$python, cfg$envdir)
+   cfg$odm_path <- run
+   saveRDS(cfg, .canobs_config_file())
+   .say("ok", "ODM recorded in the configuration of canObsR: generate_Mosa() will find it.")
+   invisible(run)
 }
 
 #' Diagnosis of the installation of canObsR
@@ -415,6 +523,8 @@ canobs_sitrep <- function() {
    }
    odm <- .find_odm(cfg$odm_path)
    .say(if (is.null(odm)) "no" else "ok", "ODM: ", if (is.null(odm)) "not found" else paste(.odm_version(odm), odm))
+   if (is.null(odm)) .say("info", if (.is_windows()) "   canObsR::canobs_install_odm() installs it" else
+                         "   with docker: generate_Mosa(..., odm_runner = \"docker\")")
    smi <- Sys.which("nvidia-smi")
    gpu <- if (nzchar(smi)) tryCatch(system2(smi, c("--query-gpu=name,driver_version", "--format=csv,noheader"),
                                             stdout = TRUE, stderr = FALSE), error = function(e) character(0))

@@ -8,7 +8,7 @@
 #  - a failure of Python leaves R alive, and Esc / Ctrl+C in R stops the Python process;
 #  - the R session is never bound to a Python: no "restart R" problems with other packages that use Python.
 
-.canobs_config_dir <- function() tools::R_user_dir("canObsR", which = "config")
+.canobs_config_dir <- function() gsub("\\\\", "/", tools::R_user_dir("canObsR", which = "config"))
 .canobs_config_file <- function() file.path(.canobs_config_dir(), "config.rds")
 
 #' Configuration saved by canobs_setup()
