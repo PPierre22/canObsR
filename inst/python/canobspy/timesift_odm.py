@@ -37,6 +37,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import threading
 import time
 
 try:
@@ -546,6 +547,24 @@ def check_odm_gpu(odm_path, fix=True):
     return {'status': 'dummy_present', 'path': dummy}
 
 
+def _watch_depthmaps(project_dir, stop, every=60):
+    """Prints the number of depth maps computed by OpenMVS (one file per image) when it changes."""
+    d = os.path.join(project_dir, 'opensfm', 'undistorted', 'openmvs', 'depthmaps')
+    img = os.path.join(project_dir, 'opensfm', 'undistorted', 'images')
+    t0, last = None, -1
+    while not stop.wait(every):
+        try:
+            done = len({m.group(1) for f in os.listdir(d) for m in [re.match(r'depth(\d+)\.dmap$', f)] if m})
+            total = len(os.listdir(img)) if os.path.isdir(img) else 0
+        except OSError:
+            continue
+        if t0 is None:
+            t0 = time.time()
+        if done != last:
+            last = done
+            log(f'dense matching: {done}/{total or "?"} depth maps ({(time.time() - t0) / 60:.0f} min)')
+
+
 LAST_RUN = {'densify_failed': False}     # set by run_odm(): the dense matching (OpenMVS) failed in the last run
 
 
@@ -570,6 +589,11 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
             tfile.write('project,stage,seconds,start,end\n')
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                 env=env, text=True, encoding='utf-8', errors='replace')
+        # OpenMVS prints nothing while it computes the depth maps (can last hours): their files show the progress
+        stop = threading.Event()
+        watcher = threading.Thread(target=_watch_depthmaps, args=(os.path.join(datasets_dir, project), stop),
+                                   daemon=True)
+        watcher.start()
         for line in proc.stdout:
             logfile.write(line)
             print(line, end='', flush=True)
@@ -588,6 +612,7 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
             if 'ran out of memory' in line or re.search(r'stages[\\/]openmvs\.py', line):
                 LAST_RUN['densify_failed'] = True
         code = proc.wait()
+        stop.set()
     if gpu_lines:
         log('GPU information found in the ODM log: ' + ' | '.join(gpu_lines))
     return code
