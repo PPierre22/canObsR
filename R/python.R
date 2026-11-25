@@ -42,12 +42,17 @@ canobs_config <- function() {
    path <- paste(c(normalizePath(bins, winslash = "\\", mustWork = FALSE), Sys.getenv("PATH")),
                  collapse = .Platform$path.sep)
    v <- c(PATH = path, CONDA_PREFIX = envdir, PYTHONNOUSERSITE = "1", PYTHONIOENCODING = "utf-8",
-          PYTHONUNBUFFERED = "1", PYTHONHOME = "", PYTHONPATH = "")
+          PYTHONUNBUFFERED = "1", PYTHONHOME = "",
+          # canobspy is run from the R package itself: always the version of the installed canObsR
+          PYTHONPATH = normalizePath(system.file("python", package = "canObsR"), winslash = "/", mustWork = FALSE))
    for (x in list(c("GDAL_DATA", "gdal"), c("PROJ_DATA", "proj"), c("PROJ_LIB", "proj"))) {
       d <- file.path(share, x[2])
       v[x[1]] <- if (dir.exists(d)) d else ""
    }
    v["GDAL_DRIVER_PATH"] <- ""
+   # floating licence of Metashape (licence server), recorded by canobs_activate_metashape(server = ...)
+   srv <- canobs_config()$metashape_server
+   if (!is.null(srv) && !nzchar(Sys.getenv("agisoft_LICENSE"))) v["agisoft_LICENSE"] <- srv
    v
 }
 

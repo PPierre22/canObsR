@@ -17,6 +17,26 @@ import sys
 import traceback
 
 
+def _metashape_valid(Metashape):
+    """True if a Metashape licence is usable (node-locked activation, or floating licence via agisoft_LICENSE)."""
+    try:
+        return bool(Metashape.License().valid)
+    except Exception:  # noqa: BLE001 - older API
+        return bool(getattr(Metashape.app, "activated", False))
+
+
+def _metashape_activate(key):
+    """Activates Metashape on this computer with a licence key (needs internet access to agisoft.com)."""
+    import Metashape
+    if _metashape_valid(Metashape):
+        return {"ok": True, "message": "already activated"}
+    try:
+        Metashape.License().activate(key)
+    except Exception as e:  # noqa: BLE001 - sent back to R
+        return {"ok": False, "message": f"{type(e).__name__}: {e}"}
+    return {"ok": _metashape_valid(Metashape), "message": "activated" if _metashape_valid(Metashape) else "not valid after activation"}
+
+
 def _versions():
     import canobspy
     out = {"python": platform.python_version(), "canobspy": canobspy.__version__,
@@ -27,7 +47,7 @@ def _versions():
             m = importlib.import_module(mod)
             out[name] = m.app.version if name == "metashape" else getattr(m, attr)
             if name == "metashape":
-                out["metashape_activated"] = bool(getattr(m.app, "activated", False))
+                out["metashape_activated"] = _metashape_valid(m)
         except Exception as e:  # noqa: BLE001 - reported, not raised
             out[name] = None
             out[name + "_error"] = f"{type(e).__name__}: {e}"
@@ -40,6 +60,10 @@ def main(argv=None):
     if cmd == "info":
         print(json.dumps(_versions()))
         return 0
+    if cmd == "metashape-activate" and len(argv) == 2:
+        res = _metashape_activate(argv[1])
+        print(json.dumps(res))
+        return 0 if res["ok"] else 1
     if cmd == "selftest":
         from canobspy import selftest
         res = selftest.run()

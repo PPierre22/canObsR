@@ -161,7 +161,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    folder_names <- as.list(folder_names)     # a python list even for a single folder
 
    if (engine == "metashape") {
-
+      .check_metashape()
       .canobs_call("timesift_metashape", "Time_SIFT_process",
                            pathDIR = path_in,
                            out_dir_ortho = out_dir_ortho,
@@ -335,6 +335,18 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    file.remove(f)
    file.rename(out, f)
    invisible(f)
+}
+
+# Before a long Metashape run: module installed and licence usable (checked again now: it may have changed)
+.check_metashape <- function() {
+   r <- .canobs_python(c("-m", "canobspy", "info"), echo = FALSE)
+   v <- tryCatch(jsonlite::fromJSON(utils::tail(strsplit(r$stdout, "\n")[[1]], 1)), error = function(e) list())
+   if (is.null(v$metashape))
+      stop("The Metashape Python module is not installed: canObsR::canobs_install_metashape(), or use engine = \"odm\".", call. = FALSE)
+   if (!isTRUE(v$metashape_activated))
+      stop("No Metashape licence is activated on this computer: canObsR::canobs_activate_metashape(\"<licence key>\"), ",
+           "or use engine = \"odm\".", call. = FALSE)
+   invisible(v)
 }
 
 # GPU check of native ODM on Windows (see odm_gpu_fix): a banner and a warning that cannot be missed

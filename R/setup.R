@@ -182,8 +182,9 @@
 #' Install, or check, everything canObsR needs outside R
 #'
 #' @description
-#' Run it once after installing canObsR, then after each update of canObsR (it updates canobspy, the Python part
-#' of canObsR) or of ODM. It can be run again at any time: what is already installed is only checked.
+#' Run it once after installing canObsR, and again after installing or updating ODM by hand. An update of canObsR
+#' needs nothing more: canobspy, its Python part, is run from the installed package. It can be run again at any
+#' time: what is already installed is only checked.
 #'
 #' Steps, each reported as `[OK]`, `[--]` (optional component absent) or `[!!]` (problem, with what to do):
 #' 1. **conda**: the one given in `conda`, else one already installed (Anaconda, Miniconda, Miniforge), else
@@ -313,18 +314,10 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    .say("ok", "Python of the environment: ", py)
    pyrun <- function(args, echo = FALSE) .run(py, args, echo = echo, env = .env_vars(envdir))
 
-   # 3. canobspy -----------------------------------------------------------------------------------------
+   # 3. canobspy ----------------------------------------------------------------------------------------
    .say("step", "3/6 canobspy (Python part of canObsR)")
-   src <- normalizePath(system.file("python", package = "canObsR"), winslash = "/")
-   build <- file.path(tempdir(), "canobspy_src")          # pip writes in the source folder: work on a copy
-   unlink(build, recursive = TRUE); dir.create(build)
-   file.copy(list.files(src, full.names = TRUE), build, recursive = TRUE)
-   r <- pyrun(c("-m", "pip", "install", "--no-deps", "--no-build-isolation", "--upgrade", "--force-reinstall",
-                "--disable-pip-version-check", "--no-input", build))
-   if (r$status != 0) {
-      .say("ko", "pip could not install canobspy (see the log)")
-      stop("Installation of canobspy failed. Log: ", log, call. = FALSE)
-   }
+   .say("ok", "used directly from the R package (always the same version as canObsR): ",
+        normalizePath(system.file("python", package = "canObsR"), winslash = "/"))
    if (!is.null(metashape_wheel)) {
       if (!file.exists(metashape_wheel)) stop("File not found: ", metashape_wheel, call. = FALSE)
       .say("info", "installation of the Metashape module: ", basename(metashape_wheel))
@@ -387,7 +380,8 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
       todo <- c(todo, paste0("ODM will not use the GPU: rename ", gpu$path, " to nvcuda.dll.odm_dummy (as administrator)"))
    }
    if (is.null(v$metashape)) todo <- c(todo, "optional, only for engine = \"metashape\":   canObsR::canobs_install_metashape()")
-   else if (!isTRUE(v$metashape_activated)) todo <- c(todo, "Metashape is not activated on this computer: activate its licence in the Metashape Professional application")
+   else if (!isTRUE(v$metashape_activated)) todo <- c(todo, paste0("Metashape module installed but NO ACTIVATED LICENCE: ",
+                                                                   "canObsR::canobs_activate_metashape(\"<licence key>\")"))
    bar <- strrep("-", 100)
    message("\n", bar)
    message(" canObsR: Python environment ready in ", round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 1), " min.")
@@ -423,8 +417,9 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    } else if (isTRUE(v$metashape_activated)) {
       .say("ok", "Metashape module ", v$metashape, ", licence activated")
    } else {
-      .say("ko", "Metashape module ", v$metashape, " installed, but no activated licence: activate Metashape Professional ",
-           "(2.x licence) on this computer, in the application (Help > Activate product)")
+      .say("ko", "Metashape module ", v$metashape, " installed, but NO ACTIVATED LICENCE: generate_Mosa(engine = ",
+           "\"metashape\") will not work. With a Metashape Professional 2.x licence key: ",
+           "canObsR::canobs_activate_metashape(\"<licence key>\")")
    }
 }
 
@@ -480,7 +475,70 @@ canobs_install_metashape <- function(version = .metashape_tested, wheel = NULL) 
    .metashape_report(v)
    cfg$versions <- v
    saveRDS(cfg, .canobs_config_file())
+   if (!isTRUE(v$metashape_activated)) .box(c(
+      paste0("Metashape module ", v$metashape, " installed, but NO LICENCE IS ACTIVATED on this computer."),
+      "generate_Mosa(engine = \"metashape\") will not work until then (engine = \"odm\", the default, does not need it).",
+      "With a Metashape Professional 2.x licence key:   canObsR::canobs_activate_metashape(\"XXXXX-XXXXX-XXXXX-XXXXX-XXXXX\")",
+      "With a licence server (floating licence):        canObsR::canobs_activate_metashape(server = \"27000@my-server\")"))
    invisible(v$metashape)
+}
+
+#' Activate the Metashape licence for canObsR
+#'
+#' @description
+#' Activates Agisoft Metashape Professional on this computer, so that `generate_Mosa(engine = "metashape")` can
+#' use the Python module installed by [canobs_install_metashape()]:
+#' * with a licence key (node-locked licence): the key is sent to the activation server of Agisoft (internet access
+#'   to agisoft.com needed); the activation is the same as in the Metashape application (*Help > Activate product*)
+#'   and is shared with it. The key is not stored by canObsR;
+#' * with a licence server (floating licence): its address is recorded in the configuration of canObsR and given to
+#'   Metashape (environment variable `agisoft_LICENSE`) each time canObsR runs it.
+#'
+#' A Metashape 2.x licence works with every 2.x version. To free a node-locked licence (e.g. before moving it to
+#' another computer), deactivate it in the Metashape application.
+#'
+#' @param key character. Licence key (`XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`).
+#' @param server character. Instead of `key`: licence server, as `port@host` (e.g. `"27000@licences.my-lab.fr"`).
+#' @return Invisibly, TRUE if a licence is usable.
+#' @export
+#' @examples
+#' \dontrun{
+#' canObsR::canobs_activate_metashape("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX")
+#' canObsR::canobs_activate_metashape(server = "27000@licences.my-lab.fr")
+#' }
+canobs_activate_metashape <- function(key = NULL, server = NULL) {
+   cfg <- canobs_config()
+   if (is.null(cfg)) stop("Run canObsR::canobs_setup() first.", call. = FALSE)
+   if (is.null(cfg$versions$metashape)) stop("Install the Metashape module first: canObsR::canobs_install_metashape()", call. = FALSE)
+   if (is.null(key) == is.null(server)) stop("Give either key or server.", call. = FALSE)
+   old <- options(canObsR.setup_log = cfg$log); on.exit(options(old), add = TRUE)
+   if (!is.null(server)) {
+      cfg$metashape_server <- server
+      saveRDS(cfg, .canobs_config_file())
+      .say("info", "licence server recorded: ", server)
+   } else {
+      key <- trimws(key)
+      .say("info", "activation of Metashape with the key ", substr(key, 1, 5), "-... (internet access to agisoft.com needed)")
+      r <- .canobs_python(c("-m", "canobspy", "metashape-activate", key), echo = FALSE)
+      a <- tryCatch(jsonlite::fromJSON(utils::tail(strsplit(r$stdout, "\n")[[1]], 1)),
+                    error = function(e) list(ok = FALSE, message = paste(utils::tail(c(strsplit(r$stdout, "\n")[[1]],
+                                                                                         strsplit(r$stderr, "\n")[[1]]), 3), collapse = " ")))
+      if (!isTRUE(a$ok)) .say("ko", "activation failed: ", a$message, ". Check the key, the internet access to agisoft.com ",
+                              "(network filter?), or activate it in the Metashape application (Help > Activate product).")
+   }
+   r <- .canobs_python(c("-m", "canobspy", "info"), echo = FALSE)
+   v <- tryCatch(jsonlite::fromJSON(utils::tail(strsplit(r$stdout, "\n")[[1]], 1)), error = function(e) list())
+   cfg <- canobs_config(); cfg$versions <- v; saveRDS(cfg, .canobs_config_file())
+   .metashape_report(v)
+   invisible(isTRUE(v$metashape_activated))
+}
+
+# framed message, impossible to miss
+.box <- function(lines) {
+   bar <- strrep("!", 100)
+   message("\n", bar, "\n", paste0(" ", lines, collapse = "\n"), "\n", bar)
+   log <- getOption("canObsR.setup_log")
+   if (!is.null(log)) cat(lines, sep = "\n", file = log, append = TRUE)
 }
 
 # ---- ODM ----------------------------------------------------------------------------------------------
@@ -611,9 +669,6 @@ canobs_sitrep <- function() {
          .say("ok", "canobspy ", v$canobspy, ", Python ", v$python, ", GDAL ", v$gdal, ", AROSICS ", v$arosics,
               if (!is.null(v$metashape)) paste0(", Metashape ", v$metashape,
                                                 if (isTRUE(v$metashape_activated)) " (licence activated)" else " (NO ACTIVATED LICENCE)"))
-         if (!identical(v$canobspy, as.character(utils::packageVersion("canObsR"))))
-            .say("ko", "canobspy ", v$canobspy, " differs from canObsR ", as.character(utils::packageVersion("canObsR")),
-                 ": run canobs_setup() to update it")
       }
    }
    odm <- .find_odm(cfg$odm_path)

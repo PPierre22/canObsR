@@ -82,6 +82,7 @@ Install Miniforge (conda of conda-forge, ~400 MB on disk) in C:/Users/me/AppData
 [OK] environment created
 
 ==> 3/6 canobspy (Python part of canObsR)
+[OK] used directly from the R package (always the same version as canObsR): C:/Users/me/AppData/Local/R/win-library/4.5/canObsR/python
 
 ==> 4/6 checks
 [OK] python 3.12.16
@@ -122,8 +123,9 @@ What `canobs_setup()` does, and does not do:
   modified; `canobs` is created once, then only checked.
 * **configuration**: saved in your user folder; the next R sessions find the environment, ODM, etc.
   automatically. Nothing is added to your `PATH`, nothing is written in `.Rprofile`.
-* It can be run again at any time: what is installed is only checked. **Run it again after each update of
-  canObsR** (it updates canobspy) **and after installing or updating ODM** (it detects it and checks its GPU).
+* It can be run again at any time: what is installed is only checked. Run it again after installing
+  or updating ODM by hand (it detects it and checks its GPU); canobspy needs nothing: it is always the copy of
+  the installed canObsR.
 
 ## 4. Install OpenDroneMap (default photogrammetry engine)
 
@@ -158,7 +160,16 @@ canObsR::canobs_install_metashape()
 
 It downloads the Python module of Metashape (2.3.2 by default, ~150 MB), installs it and checks that the licence
 is activated. A 2.x licence works with every 2.x version: the module can be more recent than the application.
-Modules before 2.3 cannot be used on Windows (they do not support the Python 3.12 of canObsR). Without internet
+If no licence is activated, it says so in a frame that cannot be missed, `library(canObsR)` reminds it, and
+`generate_Mosa(engine = "metashape")` stops before starting. To activate it:
+
+```{r}
+canObsR::canobs_activate_metashape("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX")     # licence key (node-locked)
+canObsR::canobs_activate_metashape(server = "27000@licences.my-lab.fr")  # or licence server (floating)
+```
+
+The key is sent to Agisoft (internet access to agisoft.com needed) and not stored by canObsR; the activation is the
+same as in the application (*Help > Activate product*). Modules before 2.3 cannot be used on Windows (they do not support the Python 3.12 of canObsR). Without internet
 access to agisoft.com: download the *Python 3 Module* from <https://www.agisoft.com/downloads/installer/>, then
 `canobs_install_metashape(wheel = "<path of the .whl file>")`.
 
@@ -186,7 +197,6 @@ chk$folders
 | `conda could not create the environment` | Look at the last lines printed, the full output is in the log. Frequent causes: proxy (conda needs `https://conda.anaconda.org`), antivirus blocking files, disk full, old conda. Try `canobs_setup(conda = "miniforge")`. |
 | `the path of conda contains spaces or accents` | Some packages fail to install there (frequent with Windows user names). `canobs_setup(conda = "miniforge")` installs Miniforge in `C:/canobs-miniforge3` in that case. |
 | `The Python environment of canObsR is not installed` | `canobs_setup()` has not been run on this computer, or the environment was deleted: run it. |
-| `canobspy x differs from canObsR y` | canObsR was updated: run `canobs_setup()`. |
 | `ODM WILL NOT USE THE GPU` | See *NVIDIA GPU* above. |
 | Anything else | `canobs_setup(reinstall = TRUE)` recreates the environment from scratch. Otherwise, open an issue with the output of `canobs_sitrep()` and the log. |
 

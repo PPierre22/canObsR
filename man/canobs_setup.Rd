@@ -41,8 +41,9 @@ only needed by \code{\link[=generate_Mosa]{generate_Mosa()}} with \code{engine =
 Invisibly, the configuration (see \code{\link[=canobs_config]{canobs_config()}}).
 }
 \description{
-Run it once after installing canObsR, then after each update of canObsR (it updates canobspy, the Python part
-of canObsR) or of ODM. It can be run again at any time: what is already installed is only checked.
+Run it once after installing canObsR, and again after installing or updating ODM by hand. An update of canObsR
+needs nothing more: canobspy, its Python part, is run from the installed package. It can be run again at any
+time: what is already installed is only checked.
 
 Steps, each reported as \verb{[OK]}, \verb{[--]} (optional component absent) or \verb{[!!]} (problem, with what to do):
 \enumerate{
