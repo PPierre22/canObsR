@@ -1725,6 +1725,13 @@ def timesift_odm_process(pathDIR,
                 shutil.copy2(dsm, os.path.join(out_dir_DEM, f'{site_name}{epoch}{suffix}.tif'))
             else:
                 log(f'WARNING: no DSM produced for epoch {epoch}')
+        # depth maps (about 100 MB per image): only used to make the dense point cloud, recomputed if ODM runs this
+        # epoch again from the dense matching; deleted as soon as the mosaic is made, to limit the disk used
+        dm = os.path.join(workdir, epoch, 'opensfm', 'undistorted', 'openmvs', 'depthmaps')
+        if os.path.isdir(dm):
+            size = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(dm) for f in fs)
+            shutil.rmtree(dm, ignore_errors=True)
+            log(f'Epoch {epoch}: depth maps deleted ({size / 1e9:.1f} GB freed)')
         log(f'Epoch {epoch} finished ({time.time() - te:.0f} s)')
 
     verify_projects(workdir, verbose=False)
