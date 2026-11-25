@@ -98,15 +98,12 @@
 #'   the camera, estimated on the same tie points (Metashape `calibrateColors()` estimates it too).
 #'
 #' @export
-#' @importFrom reticulate source_python
 #'
 #' @return None (metashape) or, invisibly, the paths of the orthomosaics (odm).
 #'
 #' @examples
 #'
 #' \dontrun{
-#' library(reticulate)
-#'
 #' # With OpenDroneMap (default)
 #' generate_Mosa(path_in = "path_to_my_drone_data",
 #'                out_dir_ortho = "my_output_folder/ORTHO",
@@ -159,17 +156,14 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    engine <- match.arg(engine)
    if (is.null(keypoint_limit)) keypoint_limit <- if (engine == "odm") 10000L else 100000L
    calibrate_col_by <- match.arg(calibrate_col_by)
-   py <- new.env()
-
    # same subfolders for both engines: by default the ones with a date (YYYYMMDD or YYYYMM) in their name
    if (is.null(folder_names)) folder_names <- .select_subfolders(path_in, group_by_flight)
    folder_names <- as.list(folder_names)     # a python list even for a single folder
 
    if (engine == "metashape") {
 
-      reticulate::source_python(system.file("PYTHON/TimeSIFT_scripts_auto.py", package = "canObsR"), envir = py)
-
-      py$Time_SIFT_process(pathDIR = path_in,
+      .canobs_call("timesift_metashape", "Time_SIFT_process",
+                           pathDIR = path_in,
                            out_dir_ortho = out_dir_ortho,
                            out_dir_DEM = out_dir_DEM,
                            out_dir_project = out_dir_project,
@@ -218,7 +212,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
       stop("engine = 'odm' only handles RGB images for now. Use engine = 'metashape' for multispectral images.")
    }
    if (odm_runner == "native") {
-      if (is.null(odm_path)) odm_path <- getOption("canObsR.odm_path", Sys.getenv("ODM_PATH", "C:/ODM/run.bat"))
+      if (is.null(odm_path)) odm_path <- .find_odm(canobs_config()$odm_path)
+      if (is.null(odm_path)) stop("ODM not found. Install it, then run canobs_setup() (or give odm_path).", call. = FALSE)
       if (!file.exists(odm_path)) {
          stop("ODM launcher not found: ", odm_path,
               "\nGive the path of run.bat (Windows) or run.sh (Linux) with the 'odm_path' argument.")
@@ -226,12 +221,11 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
       odm_path <- normalizePath(odm_path, winslash = "/")
    }
 
-   reticulate::source_python(system.file("PYTHON/timesift_odm.py", package = "canObsR"), envir = py)
-
    # GPU: ODM's dummy nvcuda.dll hides the NVIDIA driver on Windows (OpenMVS then runs on the CPU, 3-4 x slower)
-   if (odm_runner == "native") .check_odm_gpu(py, odm_path, odm_gpu_fix)
+   if (odm_runner == "native") .check_odm_gpu(odm_path, odm_gpu_fix)
 
-   res <- py$timesift_odm_process(pathDIR = path_in,
+   res <- .canobs_call("timesift_odm", "timesift_odm_process",
+                                  pathDIR = path_in,
                                   out_dir_ortho = out_dir_ortho,
                                   out_dir_DEM = out_dir_DEM,
                                   out_dir_project = out_dir_project,
@@ -344,8 +338,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
 }
 
 # GPU check of native ODM on Windows (see odm_gpu_fix): a banner and a warning that cannot be missed
-.check_odm_gpu <- function(py, odm_path, fix = TRUE) {
-   g <- tryCatch(py$check_odm_gpu(odm_path, fix = fix), error = function(e) list(status = "error", path = conditionMessage(e)))
+.check_odm_gpu <- function(odm_path, fix = TRUE) {
+   g <- tryCatch(.canobs_call("timesift_odm", "check_odm_gpu", odm_path = odm_path, fix = fix, .echo = FALSE), error = function(e) list(status = "error", path = conditionMessage(e)))
    bar <- strrep("=", 90)
    if (identical(g$status, "renamed")) {
       message(bar, "\nGPU: ODM's dummy nvcuda.dll hid the NVIDIA driver. It has been renamed:\n   ", g$path,
@@ -399,9 +393,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
 #' check_odm_epochs("D:/my_data/2_odm_projects")
 #' }
 check_odm_epochs <- function(out_dir_project, verbose = TRUE) {
-   py <- new.env()
-   reticulate::source_python(system.file("PYTHON/timesift_odm.py", package = "canObsR"), envir = py)
-   res <- py$verify_projects(normalizePath(out_dir_project, winslash = "/"), verbose = verbose)
+   res <- .canobs_call("timesift_odm", "verify_projects", workdir = normalizePath(out_dir_project, winslash = "/"),
+                       verbose = verbose)
    data.frame(epoch = vapply(res, function(x) x$epoch, ""),
               ok = vapply(res, function(x) isTRUE(x$ok), TRUE),
               files_checked = vapply(res, function(x) length(x$checked), 0L),

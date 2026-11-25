@@ -1,50 +1,34 @@
 Package: canObsR
-Title: Process repetead UAV survey
-Date: 2025-03-05
-Version: 0.0.0.9014
-Author: Hugo Leblanc, Hadrien Tulet, Pierre Ploton
-Maintainer: Hugo Leblanc <hugo.leblanc@ird.fr>
-Description: Aims at streamlining, standardizing and facilitating processing of repetead UAV surveys.
+Title: Orthomosaics of Long Series of Drone Flights (Time-SIFT) and their Co-Registration
+Version: 0.9.0.9000
+Date: 2026-11-25
+Authors@R: c(
+    person("Hugo", "Leblanc", email = "hugo.leblanc@ird.fr", role = c("aut", "cre")),
+    person("Hadrien", "Tulet", role = "aut"),
+    person("Pierre", "Ploton", role = "aut"))
+Description: Processing chain of the canobs drone observatories (<https://www.canobs.net>):
+    multi-temporal orthomosaics of long series of drone flights with the Time-SIFT method
+    (OpenDroneMap by default, or Agisoft Metashape), and their co-registration with AROSICS.
+    The processing is done by 'canobspy', a Python package shipped with canObsR and run in a
+    separate conda environment that canobs_setup() installs.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-Suggests: 
+Depends:
+    R (>= 4.0)
+Imports:
+    jsonlite,
+    processx (>= 3.5),
+    sf,
+    terra,
+    tools,
+    utils
+Suggests:
     knitr,
     rmarkdown,
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
-Imports: 
-    dplyr,
-    doParallel,
-    exactextractr,
-    foreach,
-    ggplot2,
-    grDevices,
-    magrittr,
-    reticulate,
-    sf,
-    shiny,
-    stars,
-    stats,
-    tibble,
-    stringr,
-    terra,
-    tools,
-    tidyr,
-    openxlsx,
-    colourpicker,
-    shinyWidgets,
-    RColorBrewer,
-    shinythemes,
-    DT,
-    furrr,
-    future,
-    shinyjs,
-    purrr
+VignetteBuilder: knitr
 URL: https://umr-amap.github.io/canObsR/, https://github.com/umr-amap/canObsR/
 BugReports: https://github.com/umr-amap/canObsR/issues
-VignetteBuilder: knitr
-Depends: 
-    R (>= 3.5)
-LazyData: true

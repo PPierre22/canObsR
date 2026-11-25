@@ -28,13 +28,11 @@
 #' chk$folders[chk$folders$status != "ok", ]
 #' }
 check_flights <- function(path_in, folder_names = NULL, check_duplicates = TRUE, verbose = TRUE) {
-   py <- new.env()
-   reticulate::source_python(system.file("PYTHON/timesift_odm.py", package = "canObsR"), envir = py)
-   res <- py$flights_report(normalizePath(path_in, winslash = "/"),
+   res <- .canobs_call("timesift_odm", "flights_report", path_in = normalizePath(path_in, winslash = "/"),
                             folder_names = if (is.null(folder_names)) NULL else as.list(folder_names),
                             check_duplicates = check_duplicates)
    to_df <- function(x, cols) {
-      if (length(x) == 0) return(as.data.frame(setNames(replicate(length(cols), logical(0), simplify = FALSE), cols)))
+      if (length(x) == 0) return(as.data.frame(structure(replicate(length(cols), logical(0), simplify = FALSE), names = cols)))
       do.call(rbind, lapply(x, function(r) as.data.frame(lapply(r[cols], function(v) if (is.null(v)) NA else v),
                                                            stringsAsFactors = FALSE)))
    }

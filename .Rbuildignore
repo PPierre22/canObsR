@@ -10,5 +10,3 @@
 ^Meta$
 __pycache__
 
-# Python package (built separately)
-^python$

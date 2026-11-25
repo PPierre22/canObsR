@@ -170,8 +170,6 @@ The Time-SIFT method is described in Feurer & Vinatier (2018) \doi{10.1016/j.isp
 \examples{
 
 \dontrun{
-library(reticulate)
-
 # With OpenDroneMap (default)
 generate_Mosa(path_in = "path_to_my_drone_data",
                out_dir_ortho = "my_output_folder/ORTHO",

@@ -13,69 +13,22 @@ development:
   mode: auto
 
 navbar:
-  title: "📦 canObsR"
+  title: "canObsR"
   structure:
     left:  [articles, reference]
     right: [search, github, lightswitch]
 
-
 reference:
-- title: Image proccessing
-  desc: >
-    Generate and align orthomosaics
+- title: Installation
   contents:
+  - canobs_setup
+  - canobs_sitrep
+  - canobs_config
+- title: Orthomosaics (Time-SIFT)
+  contents:
+  - check_flights
   - generate_Mosa
-  - align_Mosa
-  - apply_saved_matrix
-
-- title: Extract crowns data
+  - check_odm_epochs
+- title: Utilities
   contents:
-  - check_crownFile
-  - create_labelingFile
-  - extract_crownImages
-  - extract_rgbValues
-  - merge_values
-  - pivot_Labels
-
-- title: Plots
-  desc: >
-    Plot crowns data
-  contents:
-  - heatmap_Labels
-  - plot_signal
-
-
-- title: Shiny applications
-  contents:
-  - shiny_labels
-  - shiny_visualisation
-
-- title: Others functions
-  contents:
-  - check_availableCrowns
   - create_files_architecture
-  - create_nonNA_bbox
-  - extr_dates
-  - detect_conda
-
-- title: Datasets
-  desc: >
-   The four datasets used for examples and vignettes
-  contents:
-  - crowns
-  - data_labeling
-  - rgb_data
-
-articles:
-- title: Tutorials
-  contents:
-  - Installation-guide
-  - Prepare-database
-  - Generate-and-align-orthomosaics
-  - Create-compatible-crown-delineation-file
-  - Generate-crown-labels
-  - Generate-crown-indices
-  - Visualize-data
-  - Extract-crown-data
-  - workflow
-
