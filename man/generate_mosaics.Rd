@@ -55,7 +55,8 @@ prefix of the file names), \code{overwrite} (FALSE: TRUE makes again the mosaics
 \code{odm_args}, \code{odm_gpu_fix};
 \item resources: \code{max_memory_gb} (memory ODM may use, for \code{n_cores = "auto"}; default 75 \% of the RAM),
 \code{monitor} (FALSE: TRUE records the use of the processors, RAM and GPU every 5 s in
-\verb{logs/resources_<chunk>.csv}, and prints a table per step of ODM).
+\verb{logs/resources_<chunk>.csv}, and prints a table per step of ODM), \code{parallel_epochs} ("auto": dates of a
+chunk processed at the same time after its SfM, as many as the free memory allows, see \code{\link[=generate_Mosa]{generate_Mosa()}}).
 }}
 }
 \value{

@@ -47,6 +47,10 @@
 #'   the free memory (SfM: about 1.1 GB per thread for the feature detection; epochs: about 0.3 GB per thread with
 #'   `downscale_factor_depth_map = 2`). Metashape manages its processors and GPU itself.
 #' @param max_memory_gb Memory (GB) that ODM may use, for `n_cores = "auto"`. `"auto"` (default): 75 % of the RAM.
+#' @param parallel_epochs ODM: dates processed at the same time after the SfM (dense matching, meshing...), each with
+#'   a share of the threads: an integer, or `"auto"` (default): as many as the free memory allows (about 3 GB +
+#'   0.27 GB per image of the largest date, depth maps at half size), at most one per 8 processors and one per
+#'   1.5 GB of GPU memory. 1 on a laptop with 34 GB, 3 or 4 on a server with 100 GB.
 #' @param monitor_file character. ODM: CSV file where the use of the processors, RAM and GPU is recorded every 5 s
 #'   with the step that runs; a table per step is printed at the end (to find what limits the speed).
 #' @param crs character. Coordinate system of the orthomosaics, e.g. `"EPSG:32633"`. `"auto"` (default): the WGS 84 / UTM
@@ -157,7 +161,7 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                        tempdir_custom = getOption("canobsR.tempdir", NULL),
                        keypoint_limit = NULL, tiepoint_limit = 10000L,
                        calibrate_vignetting = TRUE, odm_gpu_fix = TRUE, n_cores = "auto",
-                       max_memory_gb = "auto", monitor_file = NULL) {
+                       max_memory_gb = "auto", monitor_file = NULL, parallel_epochs = "auto") {
 
    engine <- match.arg(engine)
    if (is.null(keypoint_limit)) keypoint_limit <- if (engine == "odm") 10000L else 100000L
@@ -258,7 +262,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                                   tmp_dir = tmp_sub,
                                   n_cores = n_cores,
                                   max_memory_gb = max_memory_gb,
-                                  monitor_file = monitor_file
+                                  monitor_file = monitor_file,
+                                  parallel_epochs = parallel_epochs
                                   )
 
    # same format as the Metashape outputs: RGB, white background, resol_ref grid, crs

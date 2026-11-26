@@ -618,7 +618,7 @@ def probe_openmvs_gpu(odm_path, scene, seconds=240, out_dir=None):
     return res
 
 
-def _watch_depthmaps(project_dir, stop, every=60, gpu_base=None):
+def _watch_depthmaps(project_dir, stop, every=60, gpu_base=None, state=None):
     """
     While ODM runs: prints the number of depth maps computed by OpenMVS (one file per image) when it changes, and
     warns once if an NVIDIA GPU is present but stays idle while the depth maps are computed (gpu_base: memory used
@@ -638,7 +638,7 @@ def _watch_depthmaps(project_dir, stop, every=60, gpu_base=None):
             last = done
             el = (time.time() - t0) / 60
             left = f', about {el / done * (total - done):.0f} min left for the depth maps' if total > done else ''
-            log(f'dense matching: {done}/{total or "?"} depth maps in {el:.0f} min{left}')
+            log(f'{os.path.basename(project_dir)}: dense matching: {done}/{total or "?"} depth maps in {el:.0f} min{left}')
         if gpu_base is None or used or warned or (total and done >= total):
             continue
         g = nvidia_status()
@@ -652,7 +652,8 @@ def _watch_depthmaps(project_dir, stop, every=60, gpu_base=None):
         idle += 1
         if idle >= 3:
             warned = True
-            LAST_RUN['gpu_idle'] = g
+            if state is not None:
+                state['gpu_idle'] = g
             power = (f'; power limit {g["power_limit_w"]:.0f} W: a laptop in power saving mode, or on battery, limits '
                      f'its GPU' if g.get('power_limit_w') and g['power_limit_w'] < 30 else '')
             log('!' * 100)
@@ -685,7 +686,8 @@ def _show(line, shown):
     return True
 
 
-LAST_RUN = {'densify_failed': False, 'gpu_idle': None}     # set by run_odm(): the dense matching (OpenMVS) failed in the last run
+RUN_STATE = {}       # per ODM project, set by run_odm(): {'densify_failed': the dense matching failed, 'gpu_idle': ...}
+PARALLEL_EPOCHS = 1  # epochs processed at the same time (their lines are prefixed with the epoch)
 
 
 def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
@@ -700,7 +702,8 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
         os.makedirs(tmp_dir, exist_ok=True)
         env.update(TMP=tmp_dir, TEMP=tmp_dir, TMPDIR=tmp_dir, CPL_TMPDIR=tmp_dir)
     started, gpu_lines, shown = {}, [], {}
-    LAST_RUN['densify_failed'] = False
+    st = RUN_STATE[project] = {'densify_failed': False, 'gpu_idle': None}
+    pre = f'[{project}] ' if PARALLEL_EPOCHS > 1 else ''
     timings = os.path.join(datasets_dir, TIMINGS_FILE)
     new_file = not os.path.isfile(timings)
     with open(os.path.join(datasets_dir, f'odm_{project}.log'), 'a', encoding='utf-8', errors='replace') as logfile, \
@@ -714,12 +717,13 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
         from .resources import nvidia_status
         g0 = nvidia_status()
         watcher = threading.Thread(target=_watch_depthmaps, args=(os.path.join(datasets_dir, project), stop),
-                                   kwargs={'gpu_base': (g0[0]['mem_used_mb'] or 0) if g0 else None}, daemon=True)
+                                   kwargs={'gpu_base': (g0[0]['mem_used_mb'] or 0) if g0 else None, 'state': st},
+                                   daemon=True)
         watcher.start()
         for line in proc.stdout:
             logfile.write(line)
             if _show(line, shown):
-                print(line, end='', flush=True)
+                print(pre + line, end='', flush=True)
             m = STAGE_RE.search(line)
             r = RUNNING_RE.search(line)
             if r:                                   # program run by ODM (opensfm match_features, DensifyPointCloud...)
@@ -737,7 +741,7 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
             elif GPU_RE.search(line) and len(gpu_lines) < 5 and line.strip() not in gpu_lines:
                 gpu_lines.append(line.strip())
             if 'ran out of memory' in line or re.search(r'stages[\\/]openmvs\.py', line):
-                LAST_RUN['densify_failed'] = True
+                st['densify_failed'] = True
         code = proc.wait()
         stop.set()
     if gpu_lines:
@@ -857,6 +861,33 @@ def filter_images_db(path, valid_stems):
     photos = [p for p in _read_json(path) if _stem(p.get('filename', '')) in valid_stems]
     _write_json(photos, path)
     return len(photos)
+
+
+# memory of the processing of one epoch (dense matching, meshing), GB: measured on a laptop, 26/11/2026, depth maps at
+# half the image size (20 Mpx images): +12 GB for 31 images, +18 GB for 58 images (peak of the fusion of the depth maps)
+def epoch_memory_gb(n_images, downscale_factor_depth_map=2):
+    return 3 + 0.27 * n_images * (2 / max(1, int(downscale_factor_depth_map))) ** 2
+
+
+def _parallel_epochs(parallel_epochs, epochs, downscale_factor_depth_map, max_memory_gb, n_cores):
+    """(number of epochs processed at the same time, reason). 'auto': the memory free now / memory of the largest
+    epoch, at most the number of epochs, one per 8 processors, and the GPU memory / 1.5 GB."""
+    if parallel_epochs not in (None, 'auto'):
+        return max(1, min(int(parallel_epochs), len(epochs))), f'{parallel_epochs} (parallel_epochs)'
+    from .resources import memory_budget, cores, nvidia_status
+    if len(epochs) < 2:
+        return 1, 'one epoch'
+    need = epoch_memory_gb(max(len(v) for v in epochs.values()), downscale_factor_depth_map)
+    budget = memory_budget(max_memory_gb)
+    if not budget:
+        return 1, 'memory unknown'
+    n = int(budget // need)
+    c = (int(n_cores) if n_cores not in (None, 'auto') else cores()) // 8
+    g = nvidia_status()
+    gcap = int((g[0]['mem_total_mb'] or 0) / 1500) if g else n
+    k = max(1, min(n, c, len(epochs), max(1, gcap)))
+    return k, (f'auto: {budget:.0f} GB of memory free for ODM / {need:.0f} GB for the largest epoch = {n}'
+               f'; {c} by the processors; {len(epochs)} epochs')
 
 
 def _with_threads(options, n):
@@ -1535,6 +1566,7 @@ def _timesift_odm_process(pathDIR,
                          tmp_dir=None,
                          n_cores='auto',
                          max_memory_gb='auto',
+                         parallel_epochs='auto',
                          ):
     """
     Complete Time-SIFT process with ODM: one orthomosaic (and optionally one DSM) per date or per flight.
@@ -1566,6 +1598,8 @@ def _timesift_odm_process(pathDIR,
     :param n_cores: threads of ODM (--max-concurrency): an integer, or 'auto' (processors minus a few, limited by
         the memory: about 1.5 GB per thread for the dense matching at downscale_factor_depth_map = 2).
     :param max_memory_gb: memory ODM may use, for n_cores = 'auto' (default 'auto': 75 % of the RAM).
+    :param parallel_epochs: epochs processed at the same time after the SfM (integer, or 'auto': as many as the free
+        memory allows, about 3 + 0.27 GB per image of the largest epoch with depth maps at half size).
     :return: dict {epoch: path of the orthomosaic}
     """
     t0 = time.time()
@@ -1717,11 +1751,26 @@ def _timesift_odm_process(pathDIR,
                 log(f'  vignetting ({group}, {cam}): mean correction x{corner:.3f} at the image corners '
                     f'(details in vignetting.csv)')
 
-    # 3. dense matching, DSM and orthomosaic for each epoch
-    results = {}
-    for epoch, images in epochs.items():
+    # 3. dense matching, DSM and orthomosaic for each epoch, possibly several at the same time
+    global PARALLEL_EPOCHS
+    n_par, why_par = _parallel_epochs(parallel_epochs, epochs, downscale_factor_depth_map, max_memory_gb, n_cores)
+    epoch_threads = int(options[options.index('--max-concurrency') + 1]) if '--max-concurrency' in options else None
+    if n_par > 1:
+        log(f'Epochs processed {n_par} at a time: {why_par}')
+        if epoch_threads:
+            epoch_threads = max(2, epoch_threads // n_par)
+            log(f'  {epoch_threads} ODM threads each')
+        GAIN_WORKERS = max(1, GAIN_WORKERS // n_par)
+    PARALLEL_EPOCHS = n_par
+
+    def process_epoch(epoch, images):
         te = time.time()
-        MONITOR_STATE['epoch'], MONITOR_STATE['stage'], MONITOR_STATE['step'] = epoch, '', ''
+        if n_par == 1:
+            MONITOR_STATE['epoch'], MONITOR_STATE['stage'], MONITOR_STATE['step'] = epoch, '', ''
+        else:
+            running.add(epoch)
+            MONITOR_STATE['epoch'] = '+'.join(sorted(running))
+        opts = _with_threads(options, epoch_threads)
         valid = {_stem(n) for _, n in images}
         ortho = os.path.join(workdir, epoch, 'odm_orthophoto', 'odm_orthophoto.tif')
         ep_file = os.path.join(workdir, epoch, EPOCH_PARAMS_FILE)
@@ -1746,26 +1795,27 @@ def _timesift_odm_process(pathDIR,
                     shutil.rmtree(os.path.join(workdir, epoch))    # unfinished run, or other parameters
                 make_epoch_project(workdir, epoch, images, gains)
                 rerun = ['--rerun-from', 'openmvs']
-            code = run_odm(odm_runner, odm_path, workdir, epoch, options + rerun, tmp_dir)
-            if not os.path.isfile(ortho) and LAST_RUN['densify_failed'] and '--no-gpu' not in options:
+            code = run_odm(odm_runner, odm_path, workdir, epoch, opts + rerun, tmp_dir)
+            failed = RUN_STATE.get(epoch, {}).get('densify_failed')
+            if not os.path.isfile(ortho) and failed and '--no-gpu' not in opts:
                 # OpenMVS failed, usually for lack of memory (GPU memory of a laptop, or RAM with many threads):
                 # second try on the processor, with half of the threads. Same results, slower.
-                cur = options[options.index('--max-concurrency') + 1] if '--max-concurrency' in options else os.cpu_count()
+                cur = opts[opts.index('--max-concurrency') + 1] if '--max-concurrency' in opts else os.cpu_count()
                 n_thr = max(1, int(cur or 2) // 2)
                 log('*' * 100)
                 log(f'Epoch {epoch}: the dense matching (OpenMVS) failed, probably for lack of memory. Second try on '
                     f'the processor (--no-gpu) with {n_thr} threads: same result, slower.')
                 log('*' * 100)
-                retry = [o for i, o in enumerate(options) if o != '--max-concurrency'
-                         and (i == 0 or options[i - 1] != '--max-concurrency')]
                 code = run_odm(odm_runner, odm_path, workdir, epoch,
-                               retry + ['--no-gpu', '--max-concurrency', str(n_thr), '--rerun-from', 'openmvs'], tmp_dir)
+                               _with_threads(opts, n_thr) + ['--no-gpu', '--rerun-from', 'openmvs'], tmp_dir)
+                failed = RUN_STATE.get(epoch, {}).get('densify_failed')
             if not os.path.isfile(ortho):
                 hint = ''
-                if LAST_RUN['densify_failed']:
+                if failed:
                     hint = ('\nThe dense matching (OpenMVS) failed, also on the processor: probably not enough memory '
-                            'for this computer. Options: fewer threads (n_cores), downscale_factor_depth_map = 4 (depth maps at 1/4 of the image '
-                            'size instead of 1/2: less memory, less detailed surface), or a computer with more memory. '
+                            'for this computer. Options: parallel_epochs = 1, fewer threads (n_cores), '
+                            'downscale_factor_depth_map = 4 (depth maps at 1/4 of the image size instead of 1/2: less '
+                            'memory, less detailed surface), or a computer with more memory. '
                             'The SfM is kept: running again resumes from the dense matching.')
                 raise TimeSiftError(f'ODM failed for epoch {epoch} (exit code {code}). '
                                     f'See {os.path.join(workdir, "odm_" + epoch + ".log")}{hint}')
@@ -1778,7 +1828,6 @@ def _timesift_odm_process(pathDIR,
         log(f'Epoch {epoch}: checked, only images of this epoch in the {len(check["checked"])} files that list images')
         out = os.path.join(out_dir_ortho, f'{site_name}{epoch}{suffix}.tif')
         shutil.copy2(ortho, out)
-        results[epoch] = out
         if out_dir_DEM is not None:
             dsm = os.path.join(workdir, epoch, 'odm_dem', 'dsm.tif')
             if os.path.isfile(dsm):
@@ -1793,6 +1842,36 @@ def _timesift_odm_process(pathDIR,
             shutil.rmtree(dm, ignore_errors=True)
             log(f'Epoch {epoch}: depth maps deleted ({size / 1e9:.1f} GB freed)')
         log(f'Epoch {epoch} finished ({time.time() - te:.0f} s)')
+        running.discard(epoch)
+        return out
+
+    # every epoch is tried, even if another one fails: the mosaics made are kept, the error is raised at the end
+    results, errors, running = {}, {}, set()
+    if n_par == 1:
+        for epoch, images in epochs.items():
+            try:
+                results[epoch] = process_epoch(epoch, images)
+            except TimeSiftError as e:
+                errors[epoch] = e
+                log(f'ERROR, epoch {epoch}: {e}')
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        # largest epochs first: the last ones to start are the shortest
+        order = sorted(epochs, key=lambda e: -len(epochs[e]))
+        with ThreadPoolExecutor(max_workers=n_par) as ex:
+            futures = {ex.submit(process_epoch, e, epochs[e]): e for e in order}
+            for fu, e in futures.items():
+                try:
+                    results[e] = fu.result()
+                except TimeSiftError as err:
+                    errors[e] = err
+                    log(f'ERROR, epoch {e}: {err}')
+        results = {e: results[e] for e in epochs if e in results}
+    PARALLEL_EPOCHS = 1
+    if errors:
+        timings_summary(workdir)
+        raise TimeSiftError(f'{len(errors)} epoch(s) failed out of {len(epochs)} ({", ".join(errors)}); '
+                            f'the {len(results)} others are done. ' + ' | '.join(str(v) for v in errors.values()))
 
     verify_projects(workdir, verbose=False)
     timings_summary(workdir)

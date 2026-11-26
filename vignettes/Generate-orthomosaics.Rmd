@@ -167,7 +167,11 @@ table(plan$chunk, plan$drone)
   saturated the RAM and froze the computer), while the processing of each date (dense matching, meshing) uses
   the same memory whatever the threads (all usable processors: 25). The choices are printed
   (`ODM threads, SfM block: ...`, `ODM threads, epochs: ...`). **Close the heavy programs** (browser, other
-  sessions) before a long run: their memory is not available to ODM. If the dense matching
+  sessions) before a long run: their memory is not available to ODM. After the SfM of a chunk, its dates are
+  independent: on a computer with enough memory, several are processed at the same time (option
+  `parallel_epochs`, "auto": about 3 GB + 0.27 GB per image of the largest date each; 1 on a laptop with 34 GB, 3-4
+  on a server with 100 GB), which uses the GPU and the processors much better (each date alone leaves them idle
+  half of the time). If the dense matching
   still runs out of memory (GPU memory of a laptop, for instance), the date is automatically processed again on the
   processor with half of the threads (same result, slower). Further options: `n_cores = 8`, or
   `downscale_factor_depth_map = 4` (depth maps at 1/4 of the image size: 0.5 GB per thread, less detailed surface),

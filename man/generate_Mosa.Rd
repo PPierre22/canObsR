@@ -35,7 +35,8 @@ generate_Mosa(
   odm_gpu_fix = TRUE,
   n_cores = "auto",
   max_memory_gb = "auto",
-  monitor_file = NULL
+  monitor_file = NULL,
+  parallel_epochs = "auto"
 )
 }
 \arguments{
@@ -137,6 +138,11 @@ the free memory (SfM: about 1.1 GB per thread for the feature detection; epochs:
 
 \item{monitor_file}{character. ODM: CSV file where the use of the processors, RAM and GPU is recorded every 5 s
 with the step that runs; a table per step is printed at the end (to find what limits the speed).}
+
+\item{parallel_epochs}{ODM: dates processed at the same time after the SfM (dense matching, meshing...), each with
+a share of the threads: an integer, or \code{"auto"} (default): as many as the free memory allows (about 3 GB +
+0.27 GB per image of the largest date, depth maps at half size), at most one per 8 processors and one per
+1.5 GB of GPU memory. 1 on a laptop with 34 GB, 3 or 4 on a server with 100 GB.}
 }
 \value{
 None (metashape) or, invisibly, the paths of the orthomosaics (odm).
