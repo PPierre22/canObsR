@@ -290,8 +290,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
    # exactly res would shift the far edge by several cm; resampling would smooth them).
    resample <- !.same_crs(terra::crs(r), crs) || any(abs(terra::res(r) - res) > 1e-3 * res)
    if (!resample && any(terra::res(r) != res))
-      message(basename(f), ": pixels of ODM kept, no resampling (pixel size ",
-              paste(signif(terra::res(r), 7), collapse = " x "), " m)")
+      message(basename(f), if (type == "dem") " (DSM)" else " (orthomosaic)", ": pixels of ODM kept, no resampling ",
+              "(pixel size ", paste(format(terra::res(r), digits = 9), collapse = " x "), " m)")
    if (resample) {
       message("Reprojection of ", basename(f), " (ODM: ", .crs_label(terra::crs(r)), ", ",
               paste(signif(terra::res(r), 4), collapse = " x "), " m) to ", crs, ", ", res, " m (bilinear)")
