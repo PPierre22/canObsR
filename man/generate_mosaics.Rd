@@ -35,8 +35,8 @@ WGS 84 / UTM zone of the site, from the GPS positions of the images.}
 Default: \verb{out_dir/_tmp}.}
 
 \item{n_cores}{Threads of ODM: an integer, or \code{"auto"} (default): the processors minus a few left free for the
-computer, within the free memory: the SfM of a chunk needs about 1.1 GB per thread (feature detection), the
-processing of each date much less (e.g. laptop with 28 processors and 18 GB free: 14 and 25 threads). The
+computer, within the free memory: the SfM of a chunk needs about 1.3 GB per thread (feature detection), the
+processing of each date much less (e.g. laptop with 28 processors and 18 GB free: 11 and 25 threads). The
 choices are printed. Metashape
 manages its processors itself.}
 

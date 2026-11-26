@@ -44,7 +44,7 @@
 #' @param data_type character. The type of the data used. Either 'RGB' (default) or 'MS' (for multispectral images).
 #' @param resol_ref numeric. The resolution (in meters) used to generate DEMs and orthomosaics. Defaults to 0.05.
 #' @param n_cores Threads of ODM: an integer, or `"auto"` (default): the processors minus a few left free, limited by
-#'   the free memory (SfM: about 1.1 GB per thread for the feature detection; epochs: about 0.3 GB per thread with
+#'   the free memory (SfM: about 1.3 GB per thread for the feature detection; epochs: about 0.3 GB per thread with
 #'   `downscale_factor_depth_map = 2`). Metashape manages its processors and GPU itself.
 #' @param max_memory_gb Memory (GB) that ODM may use, for `n_cores = "auto"`. `"auto"` (default): 75 % of the RAM.
 #' @param parallel_epochs ODM: dates processed at the same time after the SfM (dense matching, meshing...), each with

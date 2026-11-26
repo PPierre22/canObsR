@@ -70,9 +70,10 @@ DENSE_OPTIONS = {'--pc-quality': (1, 'openmvs'), '--pc-skip-geometric': (0, 'ope
                  '--build-overviews': (0, 'mvs_texturing'), '--cog': (0, 'mvs_texturing')}
 # Memory per ODM thread (GB), for n_cores = 'auto', measured on a laptop (28 processors, 34 GB, 3 dates / 133
 # images of 20 Mpx, 26/11/2026). SfM block: the feature detection holds one image per thread (feature quality ultra:
-# about 1.1 GB each; 26 threads with 12-16 GB used by other programs saturated the RAM). Epochs: the peak of RAM of the
+# about 1.3 GB each; 26 threads with 12-16 GB used by other programs saturated the RAM). Epochs: the peak of RAM of the
 # dense matching (+12 to +18 GB for 31 to 58 images) does not change between 17 and 26 threads: small value.
-FEATURE_MEMORY_GB = {'ultra': 1.1, 'high': 0.45, 'medium': 0.25, 'low': 0.15, 'lowest': 0.1}
+# 26/11 evening: 15 threads at ultra still reached 33.5 GB (+19.5 GB above the other programs): 1.3 GB per thread
+FEATURE_MEMORY_GB = {'ultra': 1.4, 'high': 0.6, 'medium': 0.3, 'low': 0.2, 'lowest': 0.1}
 THREAD_MEMORY_GB = {1: 0.6, 2: 0.3, 4: 0.2, 8: 0.15, 16: 0.1}
 # Options that change how ODM runs, not its results: never compared between runs (a run can be resumed with them)
 EXEC_OPTIONS = {'--no-gpu': 0, '--max-concurrency': 1, '--optimize-disk-space': 0}
@@ -1663,7 +1664,7 @@ def _timesift_odm_process(pathDIR,
     block_threads = None
     if '--max-concurrency' not in options:
         # Threads, measured on a laptop (28 processors, 34 GB, 26/11/2026): the memory of the feature detection of the
-        # SfM grows with the threads (about 1.1 GB each at feature quality ultra: 26 threads saturated the RAM and
+        # SfM grows with the threads (about 1.3 GB each at feature quality ultra: 26 threads saturated the RAM and
         # froze the computer); the memory of the epochs (dense matching, meshing) depends on the number of images,
         # not on the threads. Hence two values: the SfM block limited by the memory, the epochs by the processors.
         fq = options[options.index('--feature-quality') + 1] if '--feature-quality' in options else 'high'

@@ -131,7 +131,7 @@ slower, without any message. With \code{TRUE} (default), when an NVIDIA driver i
 (rights on the ODM folder), or with \code{FALSE}, a warning is given.}
 
 \item{n_cores}{Threads of ODM: an integer, or \code{"auto"} (default): the processors minus a few left free, limited by
-the free memory (SfM: about 1.1 GB per thread for the feature detection; epochs: about 0.3 GB per thread with
+the free memory (SfM: about 1.3 GB per thread for the feature detection; epochs: about 0.3 GB per thread with
 \code{downscale_factor_depth_map = 2}). Metashape manages its processors and GPU itself.}
 
 \item{max_memory_gb}{Memory (GB) that ODM may use, for \code{n_cores = "auto"}. \code{"auto"} (default): 75 \% of the RAM.}

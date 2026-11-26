@@ -163,7 +163,7 @@ table(plan$chunk, plan$drone)
 * **Processors and memory**: with `n_cores = "auto"`, ODM uses the processors minus a few left free for the
   computer, within the memory available (85 % of the RAM free at the start, at most 75 % of the RAM; option
   `max_memory_gb`). Two values are used, as measured on a laptop with 28 processors and 34 GB: the alignment of the
-  chunk (SfM) needs about 1.1 GB per thread for the feature detection (with 18 GB free: 14 threads; more threads
+  chunk (SfM) needs about 1.3 GB per thread for the feature detection (with 18 GB free: 11 threads; more threads
   saturated the RAM and froze the computer), while the processing of each date (dense matching, meshing) uses
   the same memory whatever the threads (all usable processors: 25). The choices are printed
   (`ODM threads, SfM block: ...`, `ODM threads, epochs: ...`). **Close the heavy programs** (browser, other
