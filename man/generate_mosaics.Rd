@@ -35,8 +35,8 @@ WGS 84 / UTM zone of the site, from the GPS positions of the images.}
 Default: \verb{out_dir/_tmp}.}
 
 \item{n_cores}{Threads of ODM: an integer, or \code{"auto"} (default): the processors minus a few left free for the
-computer, limited by the memory (about 1.5 GB per thread for the dense matching; e.g. 16 threads on a laptop
-with 28 processors and 32 GB, 49 on a server with 64 processors and 99 GB). The choice is printed. Metashape
+computer, limited by the memory (about 0.5 GB per thread: on a laptop with 28 processors and 34 GB, 25 threads;
+measured: 26 threads 21 \% faster than 17, same peak of RAM). The choice is printed. Metashape
 manages its processors itself.}
 
 \item{...}{Advanced options (an unknown name is an error):

@@ -68,9 +68,11 @@ DENSE_OPTIONS = {'--pc-quality': (1, 'openmvs'), '--pc-skip-geometric': (0, 'ope
                  '--dem-decimation': (1, 'mvs_texturing'), '--orthophoto-compression': (1, 'mvs_texturing'),
                  '--orthophoto-cutline': (0, 'mvs_texturing'), '--skip-report': (0, 'mvs_texturing'),
                  '--build-overviews': (0, 'mvs_texturing'), '--cog': (0, 'mvs_texturing')}
-# memory per ODM thread (GB), mostly for the dense matching (OpenMVS), by downscale_factor_depth_map (20 Mpx images).
-# Seen: 28 threads at factor 2 fail with 32 GB of RAM (laptop, 25/11/2026); 64 threads work with 99 GB (server).
-THREAD_MEMORY_GB = {1: 4.0, 2: 1.5, 4: 0.5, 8: 0.25, 16: 0.15}
+# memory per ODM thread (GB), by downscale_factor_depth_map (20 Mpx images), for n_cores = 'auto'. Measured on a
+# laptop with 34 GB (26/11/2026, 3 dates, 133 images): the peak of RAM is the same with 17 and 26 threads (it depends
+# on the size of the block, not on the threads), and 26 threads are 21 % faster than 17. The earlier failure with
+# 28 threads came with the Windows energy saver on. So a small value: the threads are limited by the processors.
+THREAD_MEMORY_GB = {1: 1.0, 2: 0.5, 4: 0.25, 8: 0.15, 16: 0.1}
 # Options that change how ODM runs, not its results: never compared between runs (a run can be resumed with them)
 EXEC_OPTIONS = {'--no-gpu': 0, '--max-concurrency': 1, '--optimize-disk-space': 0}
 # Settings of the Metashape pipeline of canobsR, reproduced with ODM (see the documentation of the engines):
@@ -856,6 +858,24 @@ def filter_images_db(path, valid_stems):
     return len(photos)
 
 
+GAIN_WORKERS = 1      # parallel colour corrections (threads), set by timesift_odm_process from n_cores and the RAM
+
+
+def _apply_gains(jobs):
+    """
+    apply_gain() on a list of (src, dst, corr), in parallel (threads: numpy and the image codecs release the GIL).
+    About 0.8 GB of memory per worker for 20 Mpx images.
+    """
+    if GAIN_WORKERS <= 1 or len(jobs) < 2:
+        for j in jobs:
+            apply_gain(*j)
+        return
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=GAIN_WORKERS) as ex:
+        for _ in ex.map(lambda j: apply_gain(*j), jobs):
+            pass
+
+
 def make_epoch_project(workdir, epoch, images, gains=None):
     """Light copy of the Time-SIFT block, restricted to the cameras of one epoch."""
     block = os.path.join(workdir, BLOCK_NAME)
@@ -884,12 +904,17 @@ def make_epoch_project(workdir, epoch, images, gains=None):
     und_src = os.path.join(block, 'opensfm', 'undistorted', 'images')
     und_dst = os.path.join(dst, 'opensfm', 'undistorted', 'images')
     os.makedirs(und_dst)
+    jobs = []
     for f in os.listdir(und_src):
         if _stem(f) in valid:
             if gains is not None and _stem(f) in gains:
-                apply_gain(os.path.join(und_src, f), os.path.join(und_dst, f), gains[_stem(f)])
+                jobs.append((os.path.join(und_src, f), os.path.join(und_dst, f), gains[_stem(f)]))
             else:
                 _link_or_copy(os.path.join(und_src, f), os.path.join(und_dst, f))
+    t_g = time.time()
+    _apply_gains(jobs)
+    if jobs:
+        log(f'Epoch {epoch}: colour correction of {len(jobs)} images ({GAIN_WORKERS} in parallel, {time.time() - t_g:.0f} s)')
 
     osfm = os.path.join(dst, 'opensfm')
     # tracks first: the 3D points kept are the ones seen in at least 2 images of the epoch (OpenSfM
@@ -919,15 +944,17 @@ def retexture_epoch(workdir, epoch, images, gains=None):
     valid = {_stem(name) for _, name in images}
     und_src = os.path.join(block, 'opensfm', 'undistorted', 'images')
     und_dst = os.path.join(dst, 'opensfm', 'undistorted', 'images')
+    jobs = []
     for f in os.listdir(und_src):
         if _stem(f) in valid:
             d = os.path.join(und_dst, f)
             if os.path.exists(d):
                 os.remove(d)                             # (a hard link: the block image is not modified)
             if gains is not None and _stem(f) in gains:
-                apply_gain(os.path.join(und_src, f), d, gains[_stem(f)])
+                jobs.append((os.path.join(und_src, f), d, gains[_stem(f)]))
             else:
                 _link_or_copy(os.path.join(und_src, f), d)
+    _apply_gains(jobs)
     for sub in ('odm_texturing', 'odm_texturing_25d', 'odm_orthophoto'):
         if os.path.isdir(os.path.join(dst, sub)):
             shutil.rmtree(os.path.join(dst, sub))
@@ -1590,10 +1617,13 @@ def _timesift_odm_process(pathDIR,
             log('!' * 100)
             log('WARNING: ' + pw)
             log('!' * 100)
-        per_thread = THREAD_MEMORY_GB.get(int(downscale_factor_depth_map), 1.5)
+        per_thread = THREAD_MEMORY_GB.get(int(downscale_factor_depth_map), 0.5)
         n_thr, why = auto_workers(per_thread, n_cores, max_memory_gb)
         options += ['--max-concurrency', str(n_thr)]
         log(f'ODM threads: {why}')
+    global GAIN_WORKERS
+    from .resources import auto_workers as _aw
+    GAIN_WORKERS = _aw(0.8, n_cores, max_memory_gb, cap=16)[0]
 
     if site_name:                                      # same file names as the Metashape pipeline: <site>_<date><suffix>
         site_name = site_name + '_'

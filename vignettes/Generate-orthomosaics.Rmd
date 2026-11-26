@@ -161,15 +161,17 @@ table(plan$chunk, plan$drone)
 * **Images on a network drive**: ODM reads each image several times; `stage_dir = "E:/stage"` copies the images of
   each chunk to a local disk before processing it, and deletes them afterwards.
 * **Processors and memory**: with `n_cores = "auto"`, ODM uses the processors minus a few left free for the
-  computer, but no more threads than the memory allows: the dense matching needs about 1.5 GB per thread (75 % of
-  the RAM is used at most, option `max_memory_gb`). For example 16 threads on a laptop with 28 processors and 32 GB,
-  49 on a server with 64 processors and 99 GB. The choice is printed (`ODM threads: ...`). If the dense matching
+  computer, but no more threads than the memory allows (about 0.5 GB per thread; 75 % of the RAM is used at most,
+  option `max_memory_gb`): 25 threads on a laptop with 28 processors and 34 GB. Measured on this laptop (3 dates,
+  133 images): 26 threads instead of 17 make the processing 21 % faster with the same peak of RAM, which depends
+  on the size of the chunk (about 20 GB above the use of the other programs for 3 dates) more than on the threads. The choice is printed (`ODM threads: ...`). If the dense matching
   still runs out of memory (GPU memory of a laptop, for instance), the date is automatically processed again on the
   processor with half of the threads (same result, slower). Further options: `n_cores = 8`, or
   `downscale_factor_depth_map = 4` (depth maps at 1/4 of the image size: 0.5 GB per thread, less detailed surface),
   or fewer dates per chunk (`chunk_size = 6`; for a new plan: `plan_mosaics(..., overwrite = TRUE)`).
-* **Time**: indicatively, 3 dates (133 images, 45 ha) take about 2.5 h with ODM on a workstation with an NVIDIA GPU
-  (Metashape: under 1 h). Without an NVIDIA GPU, ODM is 3 to 4 times slower.
+* **Time**: indicatively, 3 dates (133 images, 45 ha) in one chunk take 45 to 60 min with ODM on a laptop with an
+  NVIDIA GPU (28 processors, 34 GB), in "Best performance" mode: about 2 h in energy saver mode. Without an NVIDIA
+  GPU, the dense matching is 3 to 4 times slower.
 * **Some chunks only**: `chunks = c("chunk_001", "chunk_002")`, for example to share the work between computers
   (same `out_dir` on a shared disk is not advised: give each computer its own `out_dir`).
 
