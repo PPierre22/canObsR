@@ -54,11 +54,16 @@ def free_cores(n):
 
 
 def memory_budget(max_memory_gb='auto'):
-    """Memory that a step may use (GB): max_memory_gb, or 75 % of the RAM; None if unknown."""
+    """
+    Memory that a step may use (GB): max_memory_gb, or the smallest of 75 % of the RAM and 85 % of the RAM available
+    now (the other programs open can use a lot: 12-16 GB out of 34 on a laptop, 26/11/2026); None if unknown.
+    """
     if max_memory_gb not in (None, 'auto'):
         return float(max_memory_gb)
-    total, _ = ram_gb()
-    return 0.75 * total if total else None
+    total, avail = ram_gb()
+    if not total:
+        return None
+    return min(0.75 * total, 0.85 * avail) if avail else 0.75 * total
 
 
 def auto_workers(per_worker_gb, n_cores='auto', max_memory_gb='auto', cap=None):

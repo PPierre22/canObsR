@@ -161,10 +161,13 @@ table(plan$chunk, plan$drone)
 * **Images on a network drive**: ODM reads each image several times; `stage_dir = "E:/stage"` copies the images of
   each chunk to a local disk before processing it, and deletes them afterwards.
 * **Processors and memory**: with `n_cores = "auto"`, ODM uses the processors minus a few left free for the
-  computer, but no more threads than the memory allows (about 0.5 GB per thread; 75 % of the RAM is used at most,
-  option `max_memory_gb`): 25 threads on a laptop with 28 processors and 34 GB. Measured on this laptop (3 dates,
-  133 images): 26 threads instead of 17 make the processing 21 % faster with the same peak of RAM, which depends
-  on the size of the chunk (about 20 GB above the use of the other programs for 3 dates) more than on the threads. The choice is printed (`ODM threads: ...`). If the dense matching
+  computer, within the memory available (85 % of the RAM free at the start, at most 75 % of the RAM; option
+  `max_memory_gb`). Two values are used, as measured on a laptop with 28 processors and 34 GB: the alignment of the
+  chunk (SfM) needs about 1.1 GB per thread for the feature detection (with 18 GB free: 14 threads; more threads
+  saturated the RAM and froze the computer), while the processing of each date (dense matching, meshing) uses
+  the same memory whatever the threads (all usable processors: 25). The choices are printed
+  (`ODM threads, SfM block: ...`, `ODM threads, epochs: ...`). **Close the heavy programs** (browser, other
+  sessions) before a long run: their memory is not available to ODM. If the dense matching
   still runs out of memory (GPU memory of a laptop, for instance), the date is automatically processed again on the
   processor with half of the threads (same result, slower). Further options: `n_cores = 8`, or
   `downscale_factor_depth_map = 4` (depth maps at 1/4 of the image size: 0.5 GB per thread, less detailed surface),

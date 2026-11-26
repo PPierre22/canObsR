@@ -68,11 +68,12 @@ DENSE_OPTIONS = {'--pc-quality': (1, 'openmvs'), '--pc-skip-geometric': (0, 'ope
                  '--dem-decimation': (1, 'mvs_texturing'), '--orthophoto-compression': (1, 'mvs_texturing'),
                  '--orthophoto-cutline': (0, 'mvs_texturing'), '--skip-report': (0, 'mvs_texturing'),
                  '--build-overviews': (0, 'mvs_texturing'), '--cog': (0, 'mvs_texturing')}
-# memory per ODM thread (GB), by downscale_factor_depth_map (20 Mpx images), for n_cores = 'auto'. Measured on a
-# laptop with 34 GB (26/11/2026, 3 dates, 133 images): the peak of RAM is the same with 17 and 26 threads (it depends
-# on the size of the block, not on the threads), and 26 threads are 21 % faster than 17. The earlier failure with
-# 28 threads came with the Windows energy saver on. So a small value: the threads are limited by the processors.
-THREAD_MEMORY_GB = {1: 1.0, 2: 0.5, 4: 0.25, 8: 0.15, 16: 0.1}
+# Memory per ODM thread (GB), for n_cores = 'auto', measured on a laptop (28 processors, 34 GB, 3 dates / 133
+# images of 20 Mpx, 26/11/2026). SfM block: the feature detection holds one image per thread (feature quality ultra:
+# about 1.1 GB each; 26 threads with 12-16 GB used by other programs saturated the RAM). Epochs: the peak of RAM of the
+# dense matching (+12 to +18 GB for 31 to 58 images) does not change between 17 and 26 threads: small value.
+FEATURE_MEMORY_GB = {'ultra': 1.1, 'high': 0.45, 'medium': 0.25, 'low': 0.15, 'lowest': 0.1}
+THREAD_MEMORY_GB = {1: 0.6, 2: 0.3, 4: 0.2, 8: 0.15, 16: 0.1}
 # Options that change how ODM runs, not its results: never compared between runs (a run can be resumed with them)
 EXEC_OPTIONS = {'--no-gpu': 0, '--max-concurrency': 1, '--optimize-disk-space': 0}
 # Settings of the Metashape pipeline of canobsR, reproduced with ODM (see the documentation of the engines):
@@ -858,6 +859,15 @@ def filter_images_db(path, valid_stems):
     return len(photos)
 
 
+def _with_threads(options, n):
+    """options with --max-concurrency n (unchanged if n is None)."""
+    if n is None or '--max-concurrency' not in options:
+        return list(options)
+    o = list(options)
+    o[o.index('--max-concurrency') + 1] = str(n)
+    return o
+
+
 GAIN_WORKERS = 1      # parallel colour corrections (threads), set by timesift_odm_process from n_cores and the RAM
 
 
@@ -1610,17 +1620,24 @@ def _timesift_odm_process(pathDIR,
     if out_dir_DEM is not None:
         options += ['--dsm', '--dem-resolution', str(float(resol_ref) * 100)]
     options += [str(a) for a in (odm_args or [])]
-    if '--max-concurrency' not in options:            # threads: memory of the dense matching per thread
-        from .resources import auto_workers, power_warning
-        pw = power_warning()
-        if pw:
-            log('!' * 100)
-            log('WARNING: ' + pw)
-            log('!' * 100)
-        per_thread = THREAD_MEMORY_GB.get(int(downscale_factor_depth_map), 0.5)
-        n_thr, why = auto_workers(per_thread, n_cores, max_memory_gb)
+    from .resources import auto_workers, power_warning
+    pw = power_warning()
+    if pw:
+        log('!' * 100)
+        log('WARNING: ' + pw)
+        log('!' * 100)
+    block_threads = None
+    if '--max-concurrency' not in options:
+        # Threads, measured on a laptop (28 processors, 34 GB, 26/11/2026): the memory of the feature detection of the
+        # SfM grows with the threads (about 1.1 GB each at feature quality ultra: 26 threads saturated the RAM and
+        # froze the computer); the memory of the epochs (dense matching, meshing) depends on the number of images,
+        # not on the threads. Hence two values: the SfM block limited by the memory, the epochs by the processors.
+        fq = options[options.index('--feature-quality') + 1] if '--feature-quality' in options else 'high'
+        block_threads, why_b = auto_workers(FEATURE_MEMORY_GB.get(fq, 1.1), n_cores, max_memory_gb)
+        n_thr, why = auto_workers(THREAD_MEMORY_GB.get(int(downscale_factor_depth_map), 0.3), n_cores, max_memory_gb)
         options += ['--max-concurrency', str(n_thr)]
-        log(f'ODM threads: {why}')
+        log(f'ODM threads, SfM block: {why_b}')
+        log(f'ODM threads, epochs: {why}')
     global GAIN_WORKERS
     from .resources import auto_workers as _aw
     GAIN_WORKERS = _aw(0.8, n_cores, max_memory_gb, cap=16)[0]
@@ -1663,7 +1680,8 @@ def _timesift_odm_process(pathDIR,
     else:
         prepare_block(workdir, epochs)
         MONITOR_STATE['epoch'] = 'SfM block'
-        code = run_odm(odm_runner, odm_path, workdir, BLOCK_NAME, options + ['--end-with', 'opensfm'], tmp_dir)
+        code = run_odm(odm_runner, odm_path, workdir, BLOCK_NAME,
+                       _with_threads(options, block_threads) + ['--end-with', 'opensfm'], tmp_dir)
         if not os.path.isfile(sfm_done):
             raise TimeSiftError(f'ODM failed during the SfM of the multi-temporal block (exit code {code}). '
                                 f'See {os.path.join(workdir, "odm_" + BLOCK_NAME + ".log")}')

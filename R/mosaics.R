@@ -192,8 +192,9 @@ plan_mosaics <- function(flights_dir, out_dir, chunk_size = 10L, split_drones = 
 #' @param tmp_dir character. Folder for the temporary files (tens of GB for large sites): on a disk with space.
 #'   Default: `out_dir/_tmp`.
 #' @param n_cores Threads of ODM: an integer, or `"auto"` (default): the processors minus a few left free for the
-#'   computer, limited by the memory (about 0.5 GB per thread: on a laptop with 28 processors and 34 GB, 25 threads;
-#'   measured: 26 threads 21 % faster than 17, same peak of RAM). The choice is printed. Metashape
+#'   computer, within the free memory: the SfM of a chunk needs about 1.1 GB per thread (feature detection), the
+#'   processing of each date much less (e.g. laptop with 28 processors and 18 GB free: 14 and 25 threads). The
+#'   choices are printed. Metashape
 #'   manages its processors itself.
 #' @param ... Advanced options (an unknown name is an error):
 #'   * plan (used when the plan is made, see [plan_mosaics()]): `chunk_size` (10), `split_drones` (TRUE),
