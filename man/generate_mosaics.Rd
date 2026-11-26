@@ -52,7 +52,9 @@ prefix of the file names), \code{overwrite} (FALSE: TRUE makes again the mosaics
 \code{calibrate_col}, \code{calibrate_col_by}, \code{calibrate_vignetting}, \code{from_mesh}, \code{downscale_factor_alignement},
 \code{downscale_factor_depth_map}, \code{data_type}, \code{sun_sensor}, \code{check_dates}, \code{odm_path}, \code{odm_runner},
 \code{odm_args}, \code{odm_gpu_fix};
-\item resources: \code{max_memory_gb} (memory ODM may use, for \code{n_cores = "auto"}; default 75 \% of the RAM).
+\item resources: \code{max_memory_gb} (memory ODM may use, for \code{n_cores = "auto"}; default 75 \% of the RAM),
+\code{monitor} (FALSE: TRUE records the use of the processors, RAM and GPU every 5 s in
+\verb{logs/resources_<chunk>.csv}, and prints a table per step of ODM).
 }}
 }
 \value{

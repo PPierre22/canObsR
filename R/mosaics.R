@@ -135,7 +135,7 @@ plan_mosaics <- function(flights_dir, out_dir, chunk_size = 10L, split_drones = 
    data_type = "RGB", sun_sensor = FALSE, check_dates = TRUE,
    odm_path = NULL, odm_runner = "native", odm_args = NULL, odm_gpu_fix = TRUE,
    # resources
-   max_memory_gb = "auto")
+   max_memory_gb = "auto", monitor = FALSE)
 
 .check_options <- function(dots) {
    bad <- setdiff(names(dots), names(.mosaic_options))
@@ -207,7 +207,9 @@ plan_mosaics <- function(flights_dir, out_dir, chunk_size = 10L, split_drones = 
 #'     `calibrate_col`, `calibrate_col_by`, `calibrate_vignetting`, `from_mesh`, `downscale_factor_alignement`,
 #'     `downscale_factor_depth_map`, `data_type`, `sun_sensor`, `check_dates`, `odm_path`, `odm_runner`,
 #'     `odm_args`, `odm_gpu_fix`;
-#'   * resources: `max_memory_gb` (memory ODM may use, for `n_cores = "auto"`; default 75 % of the RAM).
+#'   * resources: `max_memory_gb` (memory ODM may use, for `n_cores = "auto"`; default 75 % of the RAM),
+#'     `monitor` (FALSE: TRUE records the use of the processors, RAM and GPU every 5 s in
+#'     `logs/resources_<chunk>.csv`, and prints a table per step of ODM).
 #' @return Invisibly, the journal (data.frame, one row per epoch: `chunk`, `epoch`, `status`, `started`, `minutes`,
 #'   `file`, `message`).
 #' @export
@@ -302,7 +304,8 @@ generate_mosaics <- function(flights_dir, out_dir, engine = c("odm", "metashape"
                        odm_runner = opt$odm_runner, odm_args = opt$odm_args, overwrite = opt$overwrite,
                        check_dates = opt$check_dates, tempdir_custom = tmp_dir, keypoint_limit = opt$keypoint_limit,
                        tiepoint_limit = opt$tiepoint_limit, calibrate_vignetting = opt$calibrate_vignetting,
-                       odm_gpu_fix = opt$odm_gpu_fix, n_cores = n_cores, max_memory_gb = opt$max_memory_gb)
+                       odm_gpu_fix = opt$odm_gpu_fix, n_cores = n_cores, max_memory_gb = opt$max_memory_gb,
+                       monitor_file = if (isTRUE(opt$monitor)) file.path(d_log, paste0("resources_", k, ".csv")))
          NULL
       }, error = function(e) conditionMessage(e), interrupt = function(e) "interrupted")
       options(old)

@@ -504,6 +504,12 @@ def odm_command(runner, odm_path, datasets_dir, project, options):
 
 
 STAGE_RE = re.compile(r'\[INFO\]\s+(Running|Finished) (\S+) stage')
+# '[INFO]    running "C:\...\bin\opensfm\bin\opensfm" match_features "..."' -> ('opensfm', 'match_features')
+RUNNING_RE = re.compile(r'\[INFO\]\s+running\s+"?[^"]*?[\\/]([A-Za-z_]+)(?:\.exe)?"?\s+([a-z_]+)?')
+try:
+    from .monitor import STATE as MONITOR_STATE   # noqa: E402
+except ImportError:                                   # run as a script
+    from monitor import STATE as MONITOR_STATE   # noqa: E402
 GPU_RE = re.compile(r'(?i)\b(gpu|cuda)\b')
 
 
@@ -712,7 +718,11 @@ def run_odm(runner, odm_path, datasets_dir, project, options, tmp_dir=None):
             if _show(line, shown):
                 print(line, end='', flush=True)
             m = STAGE_RE.search(line)
+            r = RUNNING_RE.search(line)
+            if r:                                   # program run by ODM (opensfm match_features, DensifyPointCloud...)
+                MONITOR_STATE['step'] = (r.group(1) + (' ' + r.group(2) if r.group(2) else ''))[:40]
             if m:
+                MONITOR_STATE['stage'], MONITOR_STATE['step'] = (m.group(2), '') if m.group(1) == 'Running' else (MONITOR_STATE['stage'], MONITOR_STATE['step'])
                 if m.group(1) == 'Running':
                     started[m.group(2)] = time.time()
                 elif m.group(2) in started:
@@ -1462,7 +1472,7 @@ def _upgrade_params(old, workdir):
 # 6. Complete process
 # ---------------------------------------------------------------------------------------------
 
-def timesift_odm_process(pathDIR,
+def _timesift_odm_process(pathDIR,
                          out_dir_ortho,
                          out_dir_DEM=None,
                          out_dir_project=None,
@@ -1622,6 +1632,7 @@ def timesift_odm_process(pathDIR,
         log('Existing SfM block found: it is re-used (use overwrite=True to recompute it)')
     else:
         prepare_block(workdir, epochs)
+        MONITOR_STATE['epoch'] = 'SfM block'
         code = run_odm(odm_runner, odm_path, workdir, BLOCK_NAME, options + ['--end-with', 'opensfm'], tmp_dir)
         if not os.path.isfile(sfm_done):
             raise TimeSiftError(f'ODM failed during the SfM of the multi-temporal block (exit code {code}). '
@@ -1662,6 +1673,7 @@ def timesift_odm_process(pathDIR,
     results = {}
     for epoch, images in epochs.items():
         te = time.time()
+        MONITOR_STATE['epoch'], MONITOR_STATE['stage'], MONITOR_STATE['step'] = epoch, '', ''
         valid = {_stem(n) for _, n in images}
         ortho = os.path.join(workdir, epoch, 'odm_orthophoto', 'odm_orthophoto.tif')
         ep_file = os.path.join(workdir, epoch, EPOCH_PARAMS_FILE)
@@ -1741,6 +1753,29 @@ def timesift_odm_process(pathDIR,
     log(f'Complete pipeline done in {time.time() - t0:.0f} s')
     log('Method: Feurer & Vinatier 2018, https://doi.org/10.1016/j.isprsjprs.2018.10.016')
     return results
+
+
+def timesift_odm_process(*args, monitor_file=None, **kwargs):
+    """
+    Time-SIFT with ODM (see _timesift_odm_process for the parameters). monitor_file: CSV file where the use of the
+    processors, RAM and GPU is recorded every 5 s with the step that runs (see canobspy.monitor); a table per step
+    is printed at the end.
+    """
+    if not monitor_file:
+        return _timesift_odm_process(*args, **kwargs)
+    from .monitor import Monitor, summarize
+    log(f'Resources recorded every 5 s in {monitor_file}')
+    MONITOR_STATE.update(epoch='', stage='', step='')
+    with Monitor(monitor_file):
+        try:
+            return _timesift_odm_process(*args, **kwargs)
+        finally:
+            MONITOR_STATE.update(epoch='', stage='', step='')
+            try:
+                log('Use of the computer per step:')
+                summarize(monitor_file)
+            except Exception as e:  # noqa: BLE001
+                log(f'(no summary of the resources: {e})')
 
 
 def main():

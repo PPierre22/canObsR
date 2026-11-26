@@ -34,7 +34,8 @@ generate_Mosa(
   calibrate_vignetting = TRUE,
   odm_gpu_fix = TRUE,
   n_cores = "auto",
-  max_memory_gb = "auto"
+  max_memory_gb = "auto",
+  monitor_file = NULL
 )
 }
 \arguments{
@@ -133,6 +134,9 @@ the memory (about 1.5 GB per thread for the dense matching with \code{downscale_
 4). Metashape manages its processors and GPU itself.}
 
 \item{max_memory_gb}{Memory (GB) that ODM may use, for \code{n_cores = "auto"}. \code{"auto"} (default): 75 \% of the RAM.}
+
+\item{monitor_file}{character. ODM: CSV file where the use of the processors, RAM and GPU is recorded every 5 s
+with the step that runs; a table per step is printed at the end (to find what limits the speed).}
 }
 \value{
 None (metashape) or, invisibly, the paths of the orthomosaics (odm).
