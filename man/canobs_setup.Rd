@@ -42,7 +42,8 @@ only needed by \code{\link[=generate_Mosa]{generate_Mosa()}} with \code{engine =
 \item{ssl_verify}{character. Certificates used by conda for HTTPS. \code{"auto"} (default): the certificate store of
 the operating system (conda >= 23.9, option \code{truststore}), which also contains the certificates that the IT of an
 institution installs when its network inspects HTTPS (the cause of "CondaSSLError ... certificate verification"
-on such networks), then the certificates of conda. Or the path of a CA certificate file (\code{.pem}, from the IT).}
+on such networks), then the certificates of conda. Or the path of a CA certificate file (\code{.pem} or \code{.crt}, e.g.
+given by the IT): it is added to the certificates of conda.}
 
 \item{mirror}{logical. If conda-forge cannot be downloaded from \code{conda.anaconda.org} (some institutional networks
 block the domains of Anaconda), try the mirror of conda-forge at \code{repo.prefix.dev} (same packages).}

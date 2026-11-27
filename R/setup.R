@@ -165,6 +165,22 @@
    if (length(hit)) hit[1] else NULL
 }
 
+# CA bundle for conda: the certificates of conda (certifi) + the certificate given by the user (e.g. the one of an
+# institution whose network inspects HTTPS), so that the sites not inspected stay verifiable too
+.ca_bundle <- function(cert, conda) {
+   root <- dirname(dirname(conda))
+   base <- c(file.path(root, "Library", "ssl", "cacert.pem"), file.path(root, "ssl", "cacert.pem"),
+             Sys.glob(file.path(root, "Lib", "site-packages", "certifi", "cacert.pem")),
+             Sys.glob(file.path(root, "lib", "python3*", "site-packages", "certifi", "cacert.pem")))
+   base <- base[file.exists(base)]
+   out <- file.path(.canobs_config_dir(), "ca_bundle.pem")
+   lines <- c(if (length(base)) readLines(base[1], warn = FALSE), "", readLines(cert, warn = FALSE))
+   writeLines(lines, out)
+   .say("info", "certificates for conda: ", basename(cert), if (length(base)) paste0(" + those of conda (", base[1], ")"),
+        " -> ", out)
+   normalizePath(out, winslash = "/")
+}
+
 # ---- engines ----------------------------------------------------------------------------------------
 .find_odm <- function(odm_path = NULL) {
    cand <- c(odm_path, getOption("canobsR.odm_path"), Sys.getenv("ODM_PATH"),
@@ -217,7 +233,8 @@
 #' @param ssl_verify character. Certificates used by conda for HTTPS. `"auto"` (default): the certificate store of
 #'   the operating system (conda >= 23.9, option `truststore`), which also contains the certificates that the IT of an
 #'   institution installs when its network inspects HTTPS (the cause of "CondaSSLError ... certificate verification"
-#'   on such networks), then the certificates of conda. Or the path of a CA certificate file (`.pem`, from the IT).
+#'   on such networks), then the certificates of conda. Or the path of a CA certificate file (`.pem` or `.crt`, e.g.
+#'   given by the IT): it is added to the certificates of conda.
 #' @param mirror logical. If conda-forge cannot be downloaded from `conda.anaconda.org` (some institutional networks
 #'   block the domains of Anaconda), try the mirror of conda-forge at `repo.prefix.dev` (same packages).
 #'
@@ -280,6 +297,10 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    .say("step", "2/6 Python environment '", envname, "' (Python, GDAL, AROSICS; conda-forge packages only)")
    # environment variables of conda: certificates (institutional networks), no notices (requests to anaconda.com)
    cenv <- c(CONDA_NUMBER_CHANNEL_NOTICES = "0")
+   if (!identical(ssl_verify, "auto")) {
+      if (!file.exists(ssl_verify)) stop("Certificate file not found: ", ssl_verify, call. = FALSE)
+      ssl_verify <- .ca_bundle(ssl_verify, cbin)
+   }
    ssl_modes <- if (!identical(ssl_verify, "auto")) list(c(CONDA_SSL_VERIFY = ssl_verify))
                 else if (numeric_version(cver) >= "23.9") list(c(CONDA_SSL_VERIFY = "truststore"), character(0))
                 else list(character(0))
