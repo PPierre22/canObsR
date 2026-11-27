@@ -297,6 +297,9 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    .say("step", "2/6 Python environment '", envname, "' (Python, GDAL, AROSICS; conda-forge packages only)")
    # environment variables of conda: certificates (institutional networks), no notices (requests to anaconda.com)
    cenv <- c(CONDA_NUMBER_CHANNEL_NOTICES = "0")
+   # a certificate given once is remembered (configuration) for the next runs of canobs_setup()
+   if (identical(ssl_verify, "auto") && !is.null(prev$ssl_cert) && file.exists(prev$ssl_cert)) ssl_verify <- prev$ssl_cert
+   ssl_cert <- if (!identical(ssl_verify, "auto")) normalizePath(ssl_verify, winslash = "/", mustWork = FALSE)
    if (!identical(ssl_verify, "auto")) {
       if (!file.exists(ssl_verify)) stop("Certificate file not found: ", ssl_verify, call. = FALSE)
       ssl_verify <- .ca_bundle(ssl_verify, cbin)
@@ -423,6 +426,7 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
    # 6. configuration ------------------------------------------------------------------------------------
    .say("step", "6/6 configuration")
    cfg <- list(conda = cbin, envname = envname, envdir = envdir, python = py, odm_path = odm, versions = v,
+               ssl_cert = ssl_cert,
                selftest = st, canobsR = as.character(utils::packageVersion("canobsR")), date = format(Sys.time()),
                log = log)
    saveRDS(cfg, .canobs_config_file())
