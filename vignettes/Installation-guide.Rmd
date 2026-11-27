@@ -221,6 +221,7 @@ chk$folders
 |---|---|
 | `download of Miniforge failed` | No internet access, proxy or firewall. Behind a proxy, set it before: `Sys.setenv(https_proxy = "http://proxy:port", http_proxy = "http://proxy:port")`. Or install Miniforge by hand (<https://conda-forge.org/download/>, "Just Me") and run `canobs_setup(conda = "<folder>/Scripts/conda.exe")`. |
 | `conda could not create the environment` | Look at the last lines printed, the full output is in the log. Frequent causes: proxy (conda needs `https://conda.anaconda.org`), antivirus blocking files, disk full, old conda. Try `canobs_setup(conda = "miniforge")`. |
+| `CondaSSLError ... certificate verification` | The network of the institution inspects HTTPS (firewall such as Fortinet) or blocks the domains of Anaconda. `canobs_setup()` tries by itself the certificates of the system and the conda-forge mirror `repo.prefix.dev` (this worked on a server of our institute). Otherwise, ask the IT for the certificate of the firewall (`.crt` / `.pem`) and run `canobs_setup(ssl_verify = "C:/certs/firewall.crt")`: it is remembered for the next runs. |
 | `the path of conda contains spaces or accents` | Some packages fail to install there (frequent with Windows user names). `canobs_setup(conda = "miniforge")` installs Miniforge in `C:/canobs-miniforge3` in that case. |
 | `The Python environment of canobsR is not installed` | `canobs_setup()` has not been run on this computer, or the environment was deleted: run it. |
 | `ODM WILL NOT USE THE GPU` | See *NVIDIA GPU* above. |
