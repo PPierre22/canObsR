@@ -157,8 +157,8 @@
 }
 
 # folder of the environment `envname` (NULL if it does not exist)
-.conda_env_dir <- function(conda, envname) {
-   r <- .run(conda, c("env", "list", "--json"), echo = FALSE)
+.conda_env_dir <- function(conda, envname, env = NULL) {
+   r <- .run(conda, c("env", "list", "--json"), echo = FALSE, env = env)
    envs <- tryCatch(unlist(jsonlite::fromJSON(r$stdout)$envs), error = function(e) character(0))
    envs <- gsub("\\\\", "/", envs)
    hit <- envs[basename(envs) == envname]
@@ -214,6 +214,12 @@
 #'   (see [canobs_install_metashape()], which downloads it). Only needed by `generate_Mosa(engine = "metashape")`.
 #' @param reinstall logical. Removes and recreates the Python environment.
 #' @param ask logical. Asks before installing Miniforge (default: in interactive sessions).
+#' @param ssl_verify character. Certificates used by conda for HTTPS. `"auto"` (default): the certificate store of
+#'   the operating system (conda >= 23.9, option `truststore`), which also contains the certificates that the IT of an
+#'   institution installs when its network inspects HTTPS (the cause of "CondaSSLError ... certificate verification"
+#'   on such networks), then the certificates of conda. Or the path of a CA certificate file (`.pem`, from the IT).
+#' @param mirror logical. If conda-forge cannot be downloaded from `conda.anaconda.org` (some institutional networks
+#'   block the domains of Anaconda), try the mirror of conda-forge at `repo.prefix.dev` (same packages).
 #'
 #' @return Invisibly, the configuration (see [canobs_config()]).
 #' @export
@@ -226,7 +232,8 @@
 #' canobsR::canobs_sitrep()                                 # diagnosis, to send with a bug report
 #' }
 canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, odm_path = NULL,
-                         metashape_wheel = NULL, reinstall = FALSE, ask = interactive()) {
+                         metashape_wheel = NULL, reinstall = FALSE, ask = interactive(), ssl_verify = "auto",
+                         mirror = TRUE) {
    dir.create(.canobs_config_dir(), recursive = TRUE, showWarnings = FALSE)
    log <- file.path(.canobs_config_dir(), paste0("setup_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
    old <- options(canobsR.setup_log = log); on.exit(options(old), add = TRUE)
@@ -271,40 +278,70 @@ canobs_setup <- function(envname = "canobs", conda = "auto", conda_dir = NULL, o
 
    # 2. environment --------------------------------------------------------------------------------------
    .say("step", "2/6 Python environment '", envname, "' (Python, GDAL, AROSICS; conda-forge packages only)")
-   envdir <- .conda_env_dir(cbin, envname)
+   # environment variables of conda: certificates (institutional networks), no notices (requests to anaconda.com)
+   cenv <- c(CONDA_NUMBER_CHANNEL_NOTICES = "0")
+   ssl_modes <- if (!identical(ssl_verify, "auto")) list(c(CONDA_SSL_VERIFY = ssl_verify))
+                else if (numeric_version(cver) >= "23.9") list(c(CONDA_SSL_VERIFY = "truststore"), character(0))
+                else list(character(0))
+   envdir <- .conda_env_dir(cbin, envname, cenv)
    if (!is.null(envdir) && reinstall) {
       .say("info", "removal of the existing environment (reinstall = TRUE)")
-      .run(cbin, c("env", "remove", "-y", "-n", envname), echo = FALSE)
+      .run(cbin, c("env", "remove", "-y", "-n", envname), echo = FALSE, env = cenv)
       if (dir.exists(envdir)) unlink(envdir, recursive = TRUE)
       envdir <- NULL
    }
    if (is.null(envdir)) {
       lock <- .lock_file()
-      r <- list(status = 1L)
+      mirror_url <- "https://repo.prefix.dev/conda-forge"
+      attempts <- list()
       if (!is.null(lock)) {
-         .say("info", "creation from the list of packages tested for ", .conda_platform(), " (",
-              sub("^# ", "", readLines(lock, n = 3)[3]), ")")
-         .say("info", "download and installation: 3 to 15 min depending on the connection (~0.5 GB, once)...")
-         r <- .run(cbin, c("create", "-y", "-n", envname, "--file", lock), echo = "conda")
-         if (r$status != 0) {
-            .say("info", "the tested list could not be installed; second try, with conda resolving the versions")
-            .run(cbin, c("env", "remove", "-y", "-n", envname), echo = FALSE)
+         attempts[[length(attempts) + 1]] <- list(what = "tested list of packages, conda-forge (conda.anaconda.org)",
+                                                  args = c("create", "-y", "-n", envname, "--file", lock))
+         if (isTRUE(mirror)) {
+            lock_m <- file.path(tempdir(), basename(lock))
+            writeLines(gsub("https://conda.anaconda.org/conda-forge", mirror_url, readLines(lock), fixed = TRUE), lock_m)
+            attempts[[length(attempts) + 1]] <- list(what = "tested list of packages, mirror repo.prefix.dev",
+                                                     args = c("create", "-y", "-n", envname, "--file", lock_m))
          }
       }
-      if (r$status != 0) {
-         .say("info", "conda resolves the versions (can take 5-20 min and 2-3 GB of memory), then downloads ~0.5 GB...")
-         args <- c("create", "-y", "-n", envname, "--override-channels", "-c", "conda-forge", solver, .canobs_pkgs)
-         r <- .run(cbin, args, echo = "conda")
-         if (r$status != 0 && length(solver) && grepl("solver", paste(r$stdout, r$stderr), ignore.case = TRUE)) {
+      attempts[[length(attempts) + 1]] <- list(what = "conda-forge, versions resolved by conda (5-20 min, 2-3 GB of memory)",
+         args = c("create", "-y", "-n", envname, "--override-channels", "-c", "conda-forge", solver, .canobs_pkgs))
+      if (isTRUE(mirror)) attempts[[length(attempts) + 1]] <- list(what = "mirror repo.prefix.dev, versions resolved by conda",
+         args = c("create", "-y", "-n", envname, "--override-channels", "-c", mirror_url, solver, .canobs_pkgs))
+      if (!is.null(lock)) .say("info", "packages tested for ", .conda_platform(), ": ", sub("^# ", "", readLines(lock, n = 3)[3]))
+      .say("info", "download and installation: 3 to 15 min depending on the connection (~0.5 GB, once)...")
+      r <- list(status = 1L, stdout = "", stderr = ""); ssl_error <- FALSE
+      for (a in attempts) {
+         for (m in ssl_modes) {
+            .say("info", "try: ", a$what, if (length(m)) paste0(" [certificates: ", m[[1]], "]"))
+            r <- .run(cbin, a$args, echo = "conda", env = c(cenv, m))
+            txt <- paste(r$stdout, r$stderr)
+            if (r$status == 0) break
+            ssl_error <- ssl_error || grepl("SSL|certificate", txt, ignore.case = TRUE)
+            .run(cbin, c("env", "remove", "-y", "-n", envname), echo = FALSE, env = cenv)
+            # an option of conda refused (old conda, truststore missing): next mode; otherwise the mode is not the cause
+            if (!grepl("truststore|ssl_verify", txt, ignore.case = TRUE) && !grepl("SSL|certificate", txt, ignore.case = TRUE)) break
+         }
+         if (r$status == 0) break
+         if (length(solver) && grepl("solver", txt, ignore.case = TRUE)) {
             .say("info", "libmamba solver not available: classic solver (slower)")
-            r <- .run(cbin, setdiff(args, solver), echo = "conda")
+            r <- .run(cbin, setdiff(a$args, solver), echo = "conda", env = c(cenv, ssl_modes[[1]]))
+            if (r$status == 0) break
          }
       }
-      envdir <- .conda_env_dir(cbin, envname)
+      envdir <- .conda_env_dir(cbin, envname, cenv)
       if (r$status != 0 || is.null(envdir)) {
          .say("ko", "conda could not create the environment (last lines above, full output in the log).")
-         .say("info", "Frequent causes: no internet / proxy (conda needs https://conda.anaconda.org), antivirus, ",
-              "disk full, path with spaces. canobs_setup(conda = \"miniforge\") avoids problems of an existing conda.")
+         if (ssl_error) {
+            .say("info", "SSL / certificate errors: the network of your institution probably inspects HTTPS (its ",
+                 "certificate is not known to conda) or blocks the servers of conda-forge. Options:")
+            .say("info", "  - ask the IT for the CA certificate of the institution (.pem), then ",
+                 "canobs_setup(ssl_verify = \"C:/path/institution_ca.pem\");")
+            .say("info", "  - ask the IT to open https://conda.anaconda.org (conda-forge: free and open packages, ",
+                 "unlike the Anaconda 'defaults' channel, which canobsR does not use) or https://repo.prefix.dev;")
+            .say("info", "  - run canobs_setup() once from another network (the environment then stays installed).")
+         } else .say("info", "Frequent causes: no internet / proxy (conda needs https://conda.anaconda.org), antivirus, ",
+                     "disk full, path with spaces. canobs_setup(conda = \"miniforge\") avoids problems of an existing conda.")
          stop("Creation of the Python environment failed. Log: ", log, call. = FALSE)
       }
       .say("ok", "environment created")
