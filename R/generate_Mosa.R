@@ -51,6 +51,9 @@
 #'   a share of the threads: an integer, or `"auto"` (default): as many as the free memory allows (about 3 GB +
 #'   0.27 GB per image of the largest date, depth maps at half size), at most one per 8 processors and one per
 #'   1.5 GB of GPU memory. 1 on a laptop with 34 GB, 3 or 4 on a server with 100 GB.
+#' @param sfm_cores ODM: threads of the SfM block (feature detection and matching of all the dates): `"auto"`
+#'   (default: as `n_cores`, limited by the memory, about 1.4 GB per thread) or an integer, which can only lower it.
+#'   The matching of OpenSfM runs in Python threads, which scale little beyond ~16 (measured on a 64-thread server).
 #' @param monitor_file character. ODM: CSV file where the use of the processors, RAM and GPU is recorded every 5 s
 #'   with the step that runs; a table per step is printed at the end (to find what limits the speed).
 #' @param crs character. Coordinate system of the orthomosaics, e.g. `"EPSG:32633"`. `"auto"` (default): the WGS 84 / UTM
@@ -161,7 +164,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                        tempdir_custom = getOption("canobsR.tempdir", NULL),
                        keypoint_limit = NULL, tiepoint_limit = 10000L,
                        calibrate_vignetting = TRUE, odm_gpu_fix = TRUE, n_cores = "auto",
-                       max_memory_gb = "auto", monitor_file = NULL, parallel_epochs = "auto") {
+                       max_memory_gb = "auto", monitor_file = NULL, parallel_epochs = "auto",
+                       sfm_cores = "auto") {
 
    engine <- match.arg(engine)
    if (is.null(keypoint_limit)) keypoint_limit <- if (engine == "odm") 10000L else 100000L
@@ -263,7 +267,8 @@ generate_Mosa <- function(path_in, out_dir_ortho, out_dir_DEM = NULL, out_dir_pr
                                   n_cores = n_cores,
                                   max_memory_gb = max_memory_gb,
                                   monitor_file = monitor_file,
-                                  parallel_epochs = parallel_epochs
+                                  parallel_epochs = parallel_epochs,
+                                  sfm_cores = sfm_cores
                                   )
 
    # same format as the Metashape outputs: RGB, white background, resol_ref grid, crs

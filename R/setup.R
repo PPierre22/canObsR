@@ -748,6 +748,17 @@ canobs_sitrep <- function() {
    pw <- tryCatch(.canobs_python(c("-c", "from canobspy.resources import power_warning; print(power_warning())"),
                                  echo = FALSE)$stdout, error = function(e) "")
    if (nzchar(trimws(pw))) .say("ko", trimws(pw))
+   pn <- tryCatch(.canobs_python(c("-c", "from canobspy.resources import power_plan_note; print(power_plan_note())"),
+                                 echo = FALSE)$stdout, error = function(e) "")
+   if (nzchar(trimws(pn))) .say("info", "note: ", trimws(pn))
+   # free space: system disk (Windows, R temporary files, conda) and disk of the Python environment
+   paths <- unique(c(if (.is_windows()) paste0(Sys.getenv("SystemDrive", "C:"), "/"), tempdir(), cfg$envdir))
+   free <- tryCatch(.canobs_call("resources", "disk_free_gb", paths = I(paths), .echo = FALSE), error = function(e) NULL)
+   for (p in names(free)) if (!is.null(free[[p]])) {
+      low <- free[[p]] < 10
+      .say(if (low) "ko" else "ok", "free space: ", free[[p]], " GB on the disk of ", p,
+           if (low) " (low: free some space, and give generate_mosaics() a tmp_dir on another disk)")
+   }
    smi <- Sys.which("nvidia-smi")
    gpu <- if (nzchar(smi)) tryCatch(system2(smi, c("--query-gpu=name,driver_version", "--format=csv,noheader"),
                                             stdout = TRUE, stderr = FALSE), error = function(e) character(0))

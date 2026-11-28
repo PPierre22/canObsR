@@ -1568,6 +1568,7 @@ def _timesift_odm_process(pathDIR,
                          n_cores='auto',
                          max_memory_gb='auto',
                          parallel_epochs='auto',
+                         sfm_cores='auto',
                          ):
     """
     Complete Time-SIFT process with ODM: one orthomosaic (and optionally one DSM) per date or per flight.
@@ -1669,6 +1670,8 @@ def _timesift_odm_process(pathDIR,
         # not on the threads. Hence two values: the SfM block limited by the memory, the epochs by the processors.
         fq = options[options.index('--feature-quality') + 1] if '--feature-quality' in options else 'high'
         block_threads, why_b = auto_workers(FEATURE_MEMORY_GB.get(fq, 1.1), n_cores, max_memory_gb)
+        if sfm_cores not in (None, 'auto') and int(sfm_cores) < block_threads:
+            block_threads, why_b = max(1, int(sfm_cores)), f'{max(1, int(sfm_cores))} (sfm_cores; auto: {why_b})'
         n_thr, why = auto_workers(THREAD_MEMORY_GB.get(int(downscale_factor_depth_map), 0.3), n_cores, max_memory_gb)
         options += ['--max-concurrency', str(n_thr)]
         log(f'ODM threads, SfM block: {why_b}')

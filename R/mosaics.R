@@ -135,7 +135,7 @@ plan_mosaics <- function(flights_dir, out_dir, chunk_size = 10L, split_drones = 
    data_type = "RGB", sun_sensor = FALSE, check_dates = TRUE,
    odm_path = NULL, odm_runner = "native", odm_args = NULL, odm_gpu_fix = TRUE,
    # resources
-   max_memory_gb = "auto", monitor = FALSE, parallel_epochs = "auto")
+   max_memory_gb = "auto", monitor = FALSE, parallel_epochs = "auto", sfm_cores = "auto")
 
 .check_options <- function(dots) {
    bad <- setdiff(names(dots), names(.mosaic_options))
@@ -211,7 +211,8 @@ plan_mosaics <- function(flights_dir, out_dir, chunk_size = 10L, split_drones = 
 #'   * resources: `max_memory_gb` (memory ODM may use, for `n_cores = "auto"`; default 75 % of the RAM),
 #'     `monitor` (FALSE: TRUE records the use of the processors, RAM and GPU every 5 s in
 #'     `logs/resources_<chunk>.csv`, and prints a table per step of ODM), `parallel_epochs` ("auto": dates of a
-#'     chunk processed at the same time after its SfM, as many as the free memory allows, see [generate_Mosa()]).
+#'     chunk processed at the same time after its SfM, as many as the free memory allows, see [generate_Mosa()]),
+#'     `sfm_cores` (threads of the SfM block, "auto" or an integer, see [generate_Mosa()]).
 #' @return Invisibly, the journal (data.frame, one row per epoch: `chunk`, `epoch`, `status`, `started`, `minutes`,
 #'   `file`, `message`).
 #' @export
@@ -242,6 +243,7 @@ generate_mosaics <- function(flights_dir, out_dir, engine = c("odm", "metashape"
    t_start <- Sys.time()
    rule <- strrep("=", 100)
    message(rule, "\ngenerate_mosaics(): ", flights_dir, "\n  -> ", out_dir, "\n", rule)
+   .check_free_space(c(out_dir = out_dir, tmp_dir = tmp_dir, projects = d_proj))
 
    # settings: the crs is decided once for the whole series; a change of settings is reported
    set <- if (file.exists(f_set)) jsonlite::read_json(f_set, simplifyVector = TRUE) else NULL
@@ -308,7 +310,7 @@ generate_mosaics <- function(flights_dir, out_dir, engine = c("odm", "metashape"
                        tiepoint_limit = opt$tiepoint_limit, calibrate_vignetting = opt$calibrate_vignetting,
                        odm_gpu_fix = opt$odm_gpu_fix, n_cores = n_cores, max_memory_gb = opt$max_memory_gb,
                        monitor_file = if (isTRUE(opt$monitor)) file.path(d_log, paste0("resources_", k, ".csv")),
-                       parallel_epochs = opt$parallel_epochs)
+                       parallel_epochs = opt$parallel_epochs, sfm_cores = opt$sfm_cores)
          NULL
       }, error = function(e) conditionMessage(e), interrupt = function(e) "interrupted")
       options(old)
@@ -349,4 +351,22 @@ generate_mosaics <- function(flights_dir, out_dir, engine = c("odm", "metashape"
    if (length(missing)) message("  not processed in this run: ", length(missing), " dates (option chunks)")
    message("  mosaics: ", d_ortho, "\n  journal:  ", f_journal, "\n", rule)
    invisible(jr)
+}
+
+
+# Free space of the disks where the mosaics, the temporary files and the ODM projects are written: a message, and a
+# warning below `min_gb` (an ODM chunk of ~10 dates of 20 Mpx images needs tens of GB while it runs).
+.check_free_space <- function(dirs, min_gb = 30) {
+   dirs <- dirs[!duplicated(dirs)]
+   free <- tryCatch(.canobs_call("resources", "disk_free_gb", paths = I(unname(dirs)), .echo = FALSE),
+                    error = function(e) NULL)
+   if (is.null(free)) return(invisible(NULL))
+   gb <- vapply(unname(dirs), function(d) if (is.null(free[[d]])) NA_real_ else as.numeric(free[[d]]), 0)
+   message("free space: ", paste0(names(dirs), " ", gb, " GB", collapse = ", "))
+   low <- !is.na(gb) & gb < min_gb
+   if (any(low))
+      warning("little free space for ", paste0(names(dirs)[low], " (", dirs[low], ": ", gb[low], " GB)", collapse = ", "),
+              ": ODM may stop with a full disk. Free some space or choose tmp_dir / out_dir on another disk.",
+              call. = FALSE, immediate. = TRUE)
+   invisible(gb)
 }

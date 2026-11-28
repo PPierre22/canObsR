@@ -143,6 +143,54 @@ def power_status():
         return None
 
 
+BALANCED_PLAN = '381b4222-f694-41f0-9685-ff5bb260df2e'   # Windows power plans (same GUIDs in every language)
+HIGH_PERFORMANCE_PLAN = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+
+
+def power_plan():
+    """Windows: GUID of the active power plan (powercfg /getactivescheme), None elsewhere or if unknown."""
+    if sys.platform != 'win32':
+        return None
+    try:
+        import re
+        import subprocess
+        out = subprocess.run(['powercfg', '/getactivescheme'], capture_output=True, text=True, timeout=20,
+                             creationflags=0x08000000).stdout
+        m = re.search(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', out)
+        return m.group(0).lower() if m else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def power_plan_note():
+    """
+    Text of a note if a computer without battery (desktop, server) uses the Balanced power plan, else ''. On a
+    Windows server (verzy, 2 x Xeon Silver 4216, 28/11/2026), one core was 3-4 x slower than on a recent laptop
+    in pure Python; the plan "High performance" may help (to measure with machine_diagnose.R).
+    """
+    p = power_status()
+    if not p or p.get('has_battery') or power_plan() != BALANCED_PLAN:
+        return ''
+    return ('the Windows power plan is "Balanced" on a computer without battery: the plan "High performance" may '
+            'speed up ODM (as administrator: powercfg /setactive ' + HIGH_PERFORMANCE_PLAN + '; on a shared server, '
+            'ask its administrator)')
+
+
+def disk_free_gb(paths):
+    """Free space (GB) of the disk of each path (its first existing parent): {path: GB or None}."""
+    import shutil
+    out = {}
+    for p in paths:
+        q = os.path.abspath(p)
+        while q and not os.path.exists(q) and os.path.dirname(q) != q:
+            q = os.path.dirname(q)
+        try:
+            out[p] = round(shutil.disk_usage(q).free / 1e9, 1)
+        except Exception:  # noqa: BLE001
+            out[p] = None
+    return out
+
+
 def power_warning():
     """Text of a warning if the computer may slow down the GPU (battery, energy saver), else ''."""
     p = power_status()
