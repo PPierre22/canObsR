@@ -92,11 +92,16 @@ def coreg_pair(ref, tgt, out_prefix, grid_res=None, window_size=256, max_shift=2
     if grid_res is None:
         grid_res = _grid_res(tgt)
     t0 = time.time()
-    crl = COREG_LOCAL(ref, tgt, grid_res=int(grid_res), window_size=(int(window_size), int(window_size)),
-                      max_shift=int(max_shift), max_iter=int(max_iter), min_reliability=float(min_reliability),
-                      r_b4match=int(band), s_b4match=int(band), nodata=(nodata, nodata),
-                      CPUs=_n_cpus(CPUs), q=True, progress=False)
-    crl.calculate_spatial_shifts()
+    from .resources import with_fewer_processes
+
+    def run(k):
+        c = COREG_LOCAL(ref, tgt, grid_res=int(grid_res), window_size=(int(window_size), int(window_size)),
+                        max_shift=int(max_shift), max_iter=int(max_iter), min_reliability=float(min_reliability),
+                        r_b4match=int(band), s_b4match=int(band), nodata=(nodata, nodata),
+                        CPUs=k, q=True, progress=False)
+        c.calculate_spatial_shifts()
+        return c
+    crl = with_fewer_processes(run, _n_cpus(CPUs))
     tbl = crl.CoRegPoints_table
     n_grid = len(tbl)
     keep_cols = [c for c in ('POINT_ID', 'X_MAP', 'Y_MAP', 'X_SHIFT_M', 'Y_SHIFT_M', 'ABS_SHIFT', 'RELIABILITY',

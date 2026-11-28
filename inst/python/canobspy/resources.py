@@ -157,3 +157,27 @@ def power_warning():
         return ''
     return (' and '.join(w) + ': the NVIDIA GPU may be left unused or limited (dense matching 3-10 x slower). Plug '
             'the computer in, turn the energy saver off and choose Settings > System > Power > "Best performance".')
+
+
+def _pool_failure(e):
+    """True if `e` is a failure of a process pool (worker killed, out of memory, Windows handle limit...)."""
+    names = {c.__name__ for c in type(e).__mro__}
+    return bool(names & {'BrokenProcessPool', 'BrokenExecutor', 'MemoryError'}) or \
+        'un-serialize' in str(e) or 'need at most 63 handles' in str(e)
+
+
+def with_fewer_processes(fn, n, log=print, what='AROSICS'):
+    """
+    Runs fn(n). If its process pool breaks (seen on a 64-thread Windows server: "BrokenProcessPool: A task has
+    failed to un-serialize"), runs it again with n // 4 processes, then with 1, instead of failing.
+    """
+    tried = []
+    for k in dict.fromkeys([max(1, int(n)), max(1, int(n) // 4), 1]):
+        try:
+            if tried:
+                log(f'    {what}: process pool failed with {tried[-1]} processes, new try with {k}')
+            return fn(k)
+        except Exception as e:  # noqa: BLE001
+            if not _pool_failure(e) or k == 1:
+                raise
+            tried.append(k)

@@ -152,10 +152,16 @@ def coregister(ref, target, out, grid_res=200, window_size=200, max_shift=60, ma
     r_nd = r.GetRasterBand(1).GetNoDataValue()
     r = None
     tmp = out + '.tmp.tif'
-    crl = COREG_LOCAL(ref, target, grid_res=grid_res, window_size=(window_size, window_size), max_shift=max_shift,
-                      max_iter=max_iter, CPUs=n_cpus(n_cores, (ref, target)), nodata=(r_nd, s_nd), r_b4match=1, s_b4match=s_band,
-                      path_out=tmp, fmt_out='GTIFF', out_crea_options=GTIFF_OPTIONS, resamp_alg_calc='cubic',
-                      resamp_alg_deshift=resampling, align_grids=False, q=False, progress=False, ignore_errors=True)
+    from .resources import with_fewer_processes
+
+    def run(k):
+        c = COREG_LOCAL(ref, target, grid_res=grid_res, window_size=(window_size, window_size), max_shift=max_shift,
+                        max_iter=max_iter, CPUs=k, nodata=(r_nd, s_nd), r_b4match=1, s_b4match=s_band,
+                        path_out=tmp, fmt_out='GTIFF', out_crea_options=GTIFF_OPTIONS, resamp_alg_calc='cubic',
+                        resamp_alg_deshift=resampling, align_grids=False, q=False, progress=False, ignore_errors=True)
+        c.calculate_spatial_shifts()
+        return c
+    crl = with_fewer_processes(run, n_cpus(n_cores, (ref, target)), log=log)
     tab = crl.CoRegPoints_table
     ok = tab[(tab['OUTLIER'] == False) & (tab['ABS_SHIFT'] != crl.outFillVal)] if 'OUTLIER' in tab else tab  # noqa: E712
     n = int(len(ok))
@@ -202,9 +208,11 @@ def apply_transform(transform, target, out, n_cores=None, resampling='cubic'):
             'reference grid': transform['reference grid'], 'mean_shifts_px': transform['mean_shifts_px'],
             'mean_shifts_map': transform['mean_shifts_map'], 'success': True}
     tmp = out + '.tmp.tif'
-    DESHIFTER(target, info, path_out=tmp, fmt_out='GTIFF', out_crea_options=GTIFF_OPTIONS,
-              nodata=transform.get('nodata', 255), align_grids=False, resamp_alg=resampling, CPUs=n_cpus(n_cores, (target,)),
-              q=True).correct_shifts()
+    from .resources import with_fewer_processes
+    with_fewer_processes(lambda k: DESHIFTER(target, info, path_out=tmp, fmt_out='GTIFF', out_crea_options=GTIFF_OPTIONS,
+                                             nodata=transform.get('nodata', 255), align_grids=False,
+                                             resamp_alg=resampling, CPUs=k, q=True).correct_shifts(),
+                         n_cpus(n_cores, (target,)), log=log)
     os.replace(tmp, out)
 
 
